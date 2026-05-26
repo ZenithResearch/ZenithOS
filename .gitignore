@@ -1,0 +1,31 @@
+# SwiftPM / Xcode build output
+.build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserdata/
+*.xcuserstate
+*.dSYM/
+
+# Built app bundles and local release artifacts
+*.app/
+release/
+
+# Compiler intermediates left by ad-hoc local builds
+*.o
+*.d
+*.swiftdeps
+*.swiftdeps~
+*.swiftdoc
+*.swiftmodule
+*.swiftsourceinfo
+*.abi.json
+output-file-map.json
+
+# Agent/local state
+.hermes/
+.pytest_cache/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*.tmp

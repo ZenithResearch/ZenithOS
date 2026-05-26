@@ -1,0 +1,46 @@
+name: ZenithOS
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  bundleIdPrefix: com.zenith
+
+targets:
+  ZenithOS:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Sources/ZenithOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zenith.ZenithOS
+        PRODUCT_NAME: ZenithOS
+        SWIFT_VERSION: "5.9"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""          # set your team ID if signing for distribution
+        ENABLE_HARDENED_RUNTIME: YES
+        LSUIElement: YES              # no dock icon
+        INFOPLIST_FILE: Sources/ZenithOS/Info.plist
+    entitlements:
+      path: ZenithOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.microphone: true
+        com.apple.security.device.audio-input: true
+    info:
+      path: Sources/ZenithOS/Info.plist
+      properties:
+        CFBundleName: ZenithOS
+        CFBundleDisplayName: ZenithOS
+        CFBundleIconFile: ZenithOSIcon
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "ZenithOS captures your microphone to transcribe FaceTime calls."
+        NSSpeechRecognitionUsageDescription: "ZenithOS uses speech recognition to transcribe FaceTime calls."
+        NSScreenCaptureUsageDescription: "ZenithOS captures FaceTime audio to transcribe calls."
+    dependencies:
+      - framework: ScreenCaptureKit.framework
+        embed: false
+      - framework: AVFoundation.framework
+        embed: false
+      - framework: Speech.framework
+        embed: false

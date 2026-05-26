@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: SwiftPM build
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build ZenithOS daemon target
+        run: swift build --target ZenithOS
+
+      - name: Build ZenithOSUI target
+        run: swift build --target ZenithOSUI
+
+      - name: Run contract tests
+        run: |
+          python3 -m venv .venv-ci
+          .venv-ci/bin/python -m pip install pytest
+          .venv-ci/bin/python -m pytest Tests -q
