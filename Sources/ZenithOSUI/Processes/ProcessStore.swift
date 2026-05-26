@@ -45,6 +45,15 @@ final class CaseStore: ObservableObject {
         return !casesBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var artifactContentBaseURL: URL? {
+        if let casesBase, !casesBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(string: casesBase)
+        }
+        return hub?.hubNodeBaseURL
+    }
+
+    var usesAdminArtifactAccess: Bool { !usesLocalCasesService }
+
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in

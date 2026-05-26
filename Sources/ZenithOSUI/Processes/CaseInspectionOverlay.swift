@@ -388,9 +388,17 @@ private struct SlotFileReferenceRow: View {
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                     if reference.resolutionState == .missing {
-                        Text("File does not resolve locally from the current case context.")
+                        Text("File does not resolve locally or through configured Hub artifact mounts.")
                             .font(.caption2)
                             .foregroundStyle(.orange)
+                    } else if reference.resolutionState == .hubArtifact {
+                        Text("Available through Hub artifact: \(reference.sourceLabel ?? reference.artifactID ?? "registered artifact")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if reference.resolutionState == .mountedFile, let sourceLabel = reference.sourceLabel {
+                        Text("Resolved through configured Hub mount: \(sourceLabel)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -427,6 +435,10 @@ private struct SlotFileReferenceRow: View {
             return "Missing file reference"
         case .unsupported:
             return "Unsupported reference"
+        case .hubArtifact:
+            return reference.previewKind == .markdown ? "Hub Markdown artifact" : "Hub artifact"
+        case .mountedFile:
+            return reference.previewKind == .markdown ? "Mounted Markdown document" : "Mounted Hub file"
         case .localFile:
             return reference.previewKind == .markdown ? "Markdown document" : "File reference"
         }
@@ -440,6 +452,10 @@ private struct SlotFileReferenceRow: View {
             return "questionmark.document"
         case .unsupported:
             return "exclamationmark.triangle"
+        case .hubArtifact:
+            return reference.previewKind == .markdown ? "doc.richtext" : "shippingbox"
+        case .mountedFile:
+            return reference.previewKind == .markdown ? "doc.richtext.fill" : "externaldrive.fill"
         case .localFile:
             return reference.previewKind == .markdown ? "doc.richtext" : "doc"
         }
@@ -449,6 +465,8 @@ private struct SlotFileReferenceRow: View {
         switch reference.resolutionState {
         case .missing, .unsupported: return .orange
         case .remoteURL: return .blue
+        case .hubArtifact: return .blue
+        case .mountedFile: return .accentColor
         case .localFile: return reference.previewKind == .markdown ? .accentColor : .secondary
         }
     }
@@ -461,14 +479,24 @@ private struct SlotMarkdownPreviewModal: View {
 
     init(reference: SlotFileReference) {
         self.reference = reference
-        let url = reference.url ?? URL(fileURLWithPath: reference.displayPath)
-        let document = (try? MarkdownDocumentSource.fromFileURL(url, context: .process))
-            ?? MarkdownDocumentSource(
-                title: url.deletingPathExtension().lastPathComponent,
-                markdown: "Could not read markdown document.",
-                sourceURL: url,
+        let url = reference.url ?? reference.artifactContentURL ?? URL(fileURLWithPath: reference.displayPath)
+        let document: MarkdownDocumentSource
+        if reference.resolutionState == .hubArtifact {
+            document = MarkdownDocumentSource(
+                title: URL(fileURLWithPath: reference.displayPath).deletingPathExtension().lastPathComponent,
+                markdown: "Loading Hub artifact…",
+                sourceURL: reference.artifactContentURL,
                 context: .process
             )
+        } else {
+            document = (try? MarkdownDocumentSource.fromFileURL(url, context: .process))
+                ?? MarkdownDocumentSource(
+                    title: url.deletingPathExtension().lastPathComponent,
+                    markdown: "Could not read markdown document.",
+                    sourceURL: url,
+                    context: .process
+                )
+        }
         self._session = StateObject(
             wrappedValue: MarkdownReaderSession(
                 initialDocument: document,
@@ -508,6 +536,58 @@ private struct SlotMarkdownPreviewModal: View {
                 .frame(minWidth: 760, minHeight: 520)
         }
         .frame(minWidth: 760, minHeight: 600)
+        .task(id: reference.id) { await loadHubArtifactIfNeeded() }
+    }
+
+    private func adminBaseURL() -> URL {
+        guard var url = reference.artifactContentURL,
+              let path = reference.artifactContentPath else {
+            return ReviewAccessHubClient.defaultHubURL
+        }
+        for _ in path.split(separator: "/") {
+            url.deleteLastPathComponent()
+        }
+        return url
+    }
+
+    private func loadHubArtifactIfNeeded() async {
+        guard reference.resolutionState == .hubArtifact else { return }
+        do {
+            let data: Data
+            if reference.usesAdminArtifactAccess, let path = reference.artifactContentPath {
+                let client = ReviewAccessHubClient(baseURL: adminBaseURL())
+                data = try await client.adminData(path: path)
+            } else if let url = reference.artifactContentURL {
+                let (fetched, response) = try await URLSession.shared.data(from: url)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw ReviewAccessHubClientError.http(http.statusCode, String(data: fetched, encoding: .utf8) ?? "")
+                }
+                data = fetched
+            } else {
+                return
+            }
+            let markdown = String(data: data, encoding: .utf8) ?? "Could not decode Hub artifact as UTF-8 Markdown."
+            let title = URL(fileURLWithPath: reference.displayPath).deletingPathExtension().lastPathComponent
+            session.setDocument(
+                MarkdownDocumentSource(
+                    title: title,
+                    markdown: markdown,
+                    sourceURL: reference.artifactContentURL,
+                    context: .process
+                ),
+                resetHistory: true
+            )
+        } catch {
+            session.setDocument(
+                MarkdownDocumentSource(
+                    title: "Hub artifact unavailable",
+                    markdown: "Could not load Hub artifact.\n\n`\(error.localizedDescription)`",
+                    sourceURL: reference.artifactContentURL,
+                    context: .process
+                ),
+                resetHistory: true
+            )
+        }
     }
 }
 

@@ -10,6 +10,9 @@ struct CaseInspectionContext {
     let consumerMap: [String: [Int]]
     let rawProcessMarkdown: String?
     let rawProcessSourceURL: URL?
+    let artifactMounts: [HubArtifactMount]
+    let artifactContentBaseURL: URL?
+    let usesAdminArtifactAccess: Bool
 }
 
 struct CaseStepInspection {
@@ -52,14 +55,22 @@ struct SlotFileReference: Equatable, Identifiable {
     let displayPath: String
     let previewKind: FilePreviewKind
     let resolutionState: FileResolutionState
+    let sourceLabel: String?
+    let artifactID: String?
+    let artifactContentPath: String?
+    let artifactContentURL: URL?
+    let usesAdminArtifactAccess: Bool
 
     var id: String { "\(resolutionState)-\(previewKind)-\(displayPath)" }
-    var isLocalFile: Bool { resolutionState == .localFile && url?.isFileURL == true }
-    var isMarkdownPreviewable: Bool { isLocalFile && previewKind == .markdown }
+    var isReadableFile: Bool { [.localFile, .mountedFile].contains(resolutionState) && url?.isFileURL == true }
+    var isLocalFile: Bool { isReadableFile }
+    var isMarkdownPreviewable: Bool { (isReadableFile || resolutionState == .hubArtifact) && previewKind == .markdown }
 }
 
 enum FileResolutionState: Equatable {
     case localFile
+    case mountedFile
+    case hubArtifact
     case missing
     case remoteURL
     case unsupported
@@ -299,7 +310,12 @@ enum CaseInspectionModel {
                 url: remoteURL,
                 displayPath: decoded,
                 previewKind: previewKind(forPath: decoded, defaultKind: defaultPreviewKind),
-                resolutionState: .remoteURL
+                resolutionState: .remoteURL,
+                sourceLabel: nil,
+                artifactID: nil,
+                artifactContentPath: nil,
+                artifactContentURL: nil,
+                usesAdminArtifactAccess: false
             )
         }
 
@@ -313,7 +329,17 @@ enum CaseInspectionModel {
             : decoded
 
         if expanded.hasPrefix("/") {
-            return localReference(for: URL(fileURLWithPath: expanded), rawPath: rawPath, defaultPreviewKind: defaultPreviewKind)
+            let absoluteReference = localReference(for: URL(fileURLWithPath: expanded), rawPath: rawPath, defaultPreviewKind: defaultPreviewKind)
+            if absoluteReference.resolutionState == .localFile {
+                return absoluteReference
+            }
+            if let mounted = mountedReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, mounts: context.artifactMounts) {
+                return mounted
+            }
+            if let artifact = artifactReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, context: context) {
+                return artifact
+            }
+            return absoluteReference
         }
 
         for base in fileRelativeBases(context: context) {
@@ -328,8 +354,70 @@ enum CaseInspectionModel {
             url: nil,
             displayPath: decoded,
             previewKind: previewKind(forPath: decoded, defaultKind: defaultPreviewKind),
-            resolutionState: .missing
+            resolutionState: .missing,
+            sourceLabel: nil,
+            artifactID: nil,
+            artifactContentPath: nil,
+            artifactContentURL: nil,
+            usesAdminArtifactAccess: false
         )
+    }
+
+    private static func mountedReference(forRuntimePath runtimePath: String, rawPath: String, defaultPreviewKind: FilePreviewKind, mounts: [HubArtifactMount]) -> SlotFileReference? {
+        guard let resolution = HubArtifactMountResolver.resolve(runtimePath: runtimePath, mounts: mounts) else { return nil }
+        return SlotFileReference(
+            rawValue: rawPath,
+            url: resolution.fileURL,
+            displayPath: resolution.fileURL.path,
+            previewKind: previewKind(forPath: resolution.fileURL.path, defaultKind: defaultPreviewKind),
+            resolutionState: .mountedFile,
+            sourceLabel: resolution.label,
+            artifactID: nil,
+            artifactContentPath: nil,
+            artifactContentURL: nil,
+            usesAdminArtifactAccess: false
+        )
+    }
+
+    private static func artifactReference(forRuntimePath runtimePath: String, rawPath: String, defaultPreviewKind: FilePreviewKind, context: CaseInspectionContext) -> SlotFileReference? {
+        guard let artifact = matchingArtifact(forRuntimePath: runtimePath, context: context),
+              let baseURL = context.artifactContentBaseURL else { return nil }
+        let contentPath = context.usesAdminArtifactAccess
+            ? "v1/admin/execution-artifacts/\(artifact.id)/content"
+            : "execution-artifacts/\(artifact.id)/content"
+        let contentURL = appendPath(contentPath, to: baseURL)
+        return SlotFileReference(
+            rawValue: rawPath,
+            url: nil,
+            displayPath: runtimePath,
+            previewKind: previewKind(forPath: runtimePath, defaultKind: defaultPreviewKind),
+            resolutionState: .hubArtifact,
+            sourceLabel: artifact.role,
+            artifactID: artifact.id,
+            artifactContentPath: contentPath,
+            artifactContentURL: contentURL,
+            usesAdminArtifactAccess: context.usesAdminArtifactAccess
+        )
+    }
+
+    private static func matchingArtifact(forRuntimePath runtimePath: String, context: CaseInspectionContext) -> ProcessArtifact? {
+        let normalizedRuntimePath = URL(fileURLWithPath: runtimePath).standardizedFileURL.path
+        return context.detail?.artifacts.first { artifact in
+            let uri = artifact.uri.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawPath: String
+            if uri.hasPrefix("dir:") { rawPath = String(uri.dropFirst(4)) }
+            else if uri.hasPrefix("file:") { rawPath = String(uri.dropFirst(5)) }
+            else { return false }
+            return URL(fileURLWithPath: rawPath).standardizedFileURL.path == normalizedRuntimePath
+        }
+    }
+
+    private static func appendPath(_ path: String, to baseURL: URL) -> URL {
+        var url = baseURL
+        for component in path.split(separator: "/") {
+            url.appendPathComponent(String(component))
+        }
+        return url
     }
 
     private static func localReference(for url: URL, rawPath: String, defaultPreviewKind: FilePreviewKind) -> SlotFileReference {
@@ -340,7 +428,12 @@ enum CaseInspectionModel {
             url: exists ? standardized : nil,
             displayPath: standardized.path,
             previewKind: previewKind(forPath: standardized.path, defaultKind: defaultPreviewKind),
-            resolutionState: exists ? .localFile : .missing
+            resolutionState: exists ? .localFile : .missing,
+            sourceLabel: nil,
+            artifactID: nil,
+            artifactContentPath: nil,
+            artifactContentURL: nil,
+            usesAdminArtifactAccess: false
         )
     }
 

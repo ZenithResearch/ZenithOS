@@ -6,8 +6,12 @@ struct HubConfigView: View {
     @State private var namespaceDraft = ""
     @State private var hubNodeDraft = ""
     @State private var adminTokenDraft = ""
+    @State private var mountRuntimePrefixDraft = ""
+    @State private var mountLocalRootDraft = ""
+    @State private var mountLabelDraft = ""
     @State private var hasAdminToken = false
     @State private var adminTokenStatus: AdminTokenStatus = .idle
+    @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
 
     var body: some View {
         ScrollView {
@@ -15,6 +19,8 @@ struct HubConfigView: View {
                 todosSection
                 Divider()
                 hubNodeSection
+                Divider()
+                artifactMountsSection
                 Divider()
                 identitySection
                 Divider()
@@ -91,6 +97,83 @@ struct HubConfigView: View {
                     }
 
                     IdentityPreviewRow(label: "Active Hub", value: store.hubNodeBaseURL.absoluteString)
+                }
+            }
+        }
+    }
+
+    // MARK: - Hub Artifact Mounts
+
+    private var artifactMountsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Hub Artifact Mounts", icon: "externaldrive.connected.to.line.below")
+
+            HubCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Map Hub/runtime artifact prefixes to operator-readable mounted directories. Case slot previews use these explicit mappings after exact local paths and before Hub-served artifact fallback. No /data or Frank path is assumed unless you configure it here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if artifactMounts.isEmpty {
+                        Text("No artifact mounts configured.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(artifactMounts) { mount in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(mount.displayLabel)
+                                            .font(.caption.weight(.semibold))
+                                        Text("\(mount.normalizedRuntimePrefix) → \(mount.normalizedLocalRootURL.path)")
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Button("Remove") { removeArtifactMount(mount) }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                }
+                                .padding(8)
+                                .background(Color.secondary.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Add mount")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("Runtime prefix, e.g. /data/frank_execution", text: $mountRuntimePrefixDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                        HStack(spacing: 8) {
+                            TextField("Mounted local root, e.g. /Volumes/hub-data/frank_execution", text: $mountLocalRootDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body.monospaced())
+                            Button("Browse") { browseArtifactMountLocalRoot() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                        TextField("Label, optional", text: $mountLabelDraft)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack(spacing: 8) {
+                            Button("Add Mount", action: addArtifactMount)
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .disabled(!canAddArtifactMount)
+                            Button("Clear") { clearArtifactMountDrafts() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(mountRuntimePrefixDraft.isEmpty && mountLocalRootDraft.isEmpty && mountLabelDraft.isEmpty)
+                        }
+                    }
                 }
             }
         }
@@ -458,6 +541,22 @@ struct HubConfigView: View {
         return namespacePreview == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
     }
 
+    private var artifactMounts: [HubArtifactMount] {
+        HubArtifactMount.load(from: hubArtifactMountsJSON)
+    }
+
+    private var trimmedMountRuntimePrefixDraft: String {
+        mountRuntimePrefixDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedMountLocalRootDraft: String {
+        mountLocalRootDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canAddArtifactMount: Bool {
+        !HubArtifactMount.normalizeRuntimePrefix(trimmedMountRuntimePrefixDraft).isEmpty && !trimmedMountLocalRootDraft.isEmpty
+    }
+
     private var trimmedAdminTokenDraft: String {
         adminTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -505,6 +604,40 @@ struct HubConfigView: View {
             adminTokenStatus = .deleted
         } catch {
             adminTokenStatus = .failed(error.localizedDescription)
+        }
+    }
+
+    private func addArtifactMount() {
+        guard canAddArtifactMount else { return }
+        let mount = HubArtifactMount(
+            runtimePrefix: trimmedMountRuntimePrefixDraft,
+            localRoot: trimmedMountLocalRootDraft,
+            label: mountLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        let next = HubArtifactMount.normalized(artifactMounts.filter { $0.normalizedRuntimePrefix != mount.normalizedRuntimePrefix } + [mount])
+        hubArtifactMountsJSON = HubArtifactMount.encode(next)
+        clearArtifactMountDrafts()
+    }
+
+    private func removeArtifactMount(_ mount: HubArtifactMount) {
+        let next = artifactMounts.filter { $0.id != mount.id }
+        hubArtifactMountsJSON = HubArtifactMount.encode(next)
+    }
+
+    private func clearArtifactMountDrafts() {
+        mountRuntimePrefixDraft = ""
+        mountLocalRootDraft = ""
+        mountLabelDraft = ""
+    }
+
+    private func browseArtifactMountLocalRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select Artifact Root"
+        if panel.runModal() == .OK, let url = panel.url {
+            mountLocalRootDraft = url.path
         }
     }
 

@@ -187,6 +187,22 @@ struct ProcessLog: Identifiable, Hashable, Decodable {
     static func == (l: Self, r: Self) -> Bool { l.id == r.id }
 }
 
+struct ProcessArtifact: Identifiable, Hashable, Decodable {
+    let id: String
+    let caseId: String
+    let caseRunId: String
+    let stepRunId: String?
+    let spanId: String?
+    let role: String
+    let uri: String
+    let sha256: String?
+    let sizeBytes: Int?
+    let contentType: String?
+    let redactionStatus: String
+    let metadataJson: JSONValue?
+    let createdAt: String
+}
+
 struct CaseProgress: Hashable, Decodable {
     let totalSteps: Int
     let completedSteps: [String]
@@ -222,10 +238,22 @@ struct CaseDetailResponse: Decodable {
     let steps: [ProcessStep]
     let slots: [ProcessSlot]
     let logs: [ProcessLog]
+    let artifacts: [ProcessArtifact]
     let progress: CaseProgress?
 
     enum CodingKeys: String, CodingKey {
         case caseItem = "case"
-        case contract, steps, slots, logs, progress
+        case contract, steps, slots, logs, artifacts, progress
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        caseItem = try container.decode(ProcessCase.self, forKey: .caseItem)
+        contract = try container.decodeIfPresent(ProcessContract.self, forKey: .contract)
+        steps = try container.decodeIfPresent([ProcessStep].self, forKey: .steps) ?? []
+        slots = try container.decodeIfPresent([ProcessSlot].self, forKey: .slots) ?? []
+        logs = try container.decodeIfPresent([ProcessLog].self, forKey: .logs) ?? []
+        artifacts = try container.decodeIfPresent([ProcessArtifact].self, forKey: .artifacts) ?? []
+        progress = try container.decodeIfPresent(CaseProgress.self, forKey: .progress)
     }
 }

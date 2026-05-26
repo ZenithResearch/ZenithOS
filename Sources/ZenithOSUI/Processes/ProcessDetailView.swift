@@ -32,6 +32,8 @@ struct ProcessDetailView: View {
                         rawProcessSourceURL: rawProcessSourceURL,
                         streamMode: store.detailStreamMode,
                         gatewayBase: gatewayBase,
+                        artifactContentBaseURL: store.artifactContentBaseURL,
+                        usesAdminArtifactAccess: store.usesAdminArtifactAccess,
                         onExpandDocument: { expandedDocument = $0 }
                     )
                 } else if let spec {
@@ -43,6 +45,8 @@ struct ProcessDetailView: View {
                         rawProcessSourceURL: rawProcessSourceURL,
                         streamMode: store.detailStreamMode,
                         gatewayBase: gatewayBase,
+                        artifactContentBaseURL: store.artifactContentBaseURL,
+                        usesAdminArtifactAccess: store.usesAdminArtifactAccess,
                         onExpandDocument: { expandedDocument = $0 }
                     )
                 } else if let err = specError {
@@ -276,10 +280,13 @@ private struct ProcessSpecView: View {
     let rawProcessSourceURL: URL?
     let streamMode: CaseDetailStreamMode
     let gatewayBase: String
+    let artifactContentBaseURL: URL?
+    let usesAdminArtifactAccess: Bool
     let onExpandDocument: (MarkdownDocumentSource) -> Void
     @State private var hoveredStepIndex: Int? = nil
     @State private var hoveredInspectionTarget: CaseInspectionSelection? = nil
     @State private var pinnedInspectionTarget: CaseInspectionSelection? = nil
+    @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
 
     private var displaySteps: [SpecStep] {
         normalizedDisplaySteps(spec.steps)
@@ -297,7 +304,10 @@ private struct ProcessSpecView: View {
             producerMap: producerMap,
             consumerMap: consumerMap(from: displaySteps),
             rawProcessMarkdown: rawProcessMarkdown,
-            rawProcessSourceURL: rawProcessSourceURL
+            rawProcessSourceURL: rawProcessSourceURL,
+            artifactMounts: HubArtifactMount.load(from: hubArtifactMountsJSON),
+            artifactContentBaseURL: artifactContentBaseURL,
+            usesAdminArtifactAccess: usesAdminArtifactAccess
         )
     }
 
@@ -412,10 +422,13 @@ private struct ProcessContractView: View {
     let rawProcessSourceURL: URL?
     let streamMode: CaseDetailStreamMode
     let gatewayBase: String
+    let artifactContentBaseURL: URL?
+    let usesAdminArtifactAccess: Bool
     let onExpandDocument: (MarkdownDocumentSource) -> Void
     @State private var hoveredStepIndex: Int? = nil
     @State private var hoveredInspectionTarget: CaseInspectionSelection? = nil
     @State private var pinnedInspectionTarget: CaseInspectionSelection? = nil
+    @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
 
     private var displaySteps: [SpecStep] {
         normalizedDisplaySteps(contract.steps)
@@ -431,7 +444,10 @@ private struct ProcessContractView: View {
             producerMap: contract.producerMap,
             consumerMap: contract.consumerMap,
             rawProcessMarkdown: rawProcessMarkdown,
-            rawProcessSourceURL: rawProcessSourceURL
+            rawProcessSourceURL: rawProcessSourceURL,
+            artifactMounts: HubArtifactMount.load(from: hubArtifactMountsJSON),
+            artifactContentBaseURL: artifactContentBaseURL,
+            usesAdminArtifactAccess: usesAdminArtifactAccess
         )
     }
 
