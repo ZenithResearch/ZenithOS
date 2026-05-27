@@ -45,7 +45,7 @@ struct HubFSManifest: Decodable, Equatable {
 }
 
 enum HubFSPath {
-    static let defaultNamespaces = ["/data"]
+    static let defaultNamespaces = ["/data", "/app/base/ops/processes"]
 
     static func normalize(_ rawPath: String) -> String? {
         let expanded = rawPath.hasPrefix("~/")
