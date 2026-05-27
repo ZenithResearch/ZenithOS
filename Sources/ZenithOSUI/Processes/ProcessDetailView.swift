@@ -1356,25 +1356,6 @@ private struct DagGraphView: View {
                                 hoveredStepIndex: hoveredStepIndex
                             )
 
-                            ForEach(renderedEdges, id: \._inspectionID) { edge in
-                                if let geometry = layout.geometry(for: edge) {
-                                    let slotNames = edgeSlotNames(edge)
-                                    let selection = CaseInspectionSelection.edge(from: edge.from, to: edge.to, slotNames: slotNames)
-                                    DagEdgeSelectionOverlay(
-                                        edge: edge,
-                                        slotNames: slotNames,
-                                        geometry: geometry,
-                                        isSelected: pinnedInspectionTarget == selection,
-                                        onHoverChanged: { hovering in
-                                            hoveredInspectionTarget = hovering ? selection : nil
-                                        },
-                                        onSelect: {
-                                            pinnedInspectionTarget = selection
-                                        }
-                                    )
-                                }
-                            }
-
                             ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
                                 if let center = layout.centers[index] {
                                     DagGraphNode(
@@ -1456,17 +1437,6 @@ private struct DagGraphView: View {
             return
         }
         self.selectedExecutionStepID = runningSteps.first?.id
-    }
-
-    private func edgeSlotNames(_ edge: DagEdge) -> [String] {
-        guard steps.indices.contains(edge.from), steps.indices.contains(edge.to) else {
-            return edge.label.isEmpty ? [] : [edge.label]
-        }
-        return CaseInspectionModel.slotNamesForEdge(
-            from: steps[edge.from],
-            to: steps[edge.to],
-            context: inspectionContext
-        )
     }
 }
 
@@ -1742,46 +1712,6 @@ private func compactProcessTimestamp(_ raw: String?) -> String? {
 private struct DagEdgePair: Hashable {
     let from: Int
     let to: Int
-}
-
-private extension DagEdge {
-    var _inspectionID: String { "\(from)-\(to)-\(label)" }
-}
-
-private struct DagEdgeSelectionOverlay: View {
-    let edge: DagEdge
-    let slotNames: [String]
-    let geometry: DagEdgeGeometry
-    let isSelected: Bool
-    let onHoverChanged: (Bool) -> Void
-    let onSelect: () -> Void
-
-    private var midpoint: CGPoint { geometry.point(at: 0.5) }
-
-    var body: some View {
-        Button(action: onSelect) {
-            Circle()
-                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.58))
-                .frame(width: isSelected ? 9 : 7, height: isSelected ? 9 : 7)
-                .padding(6)
-                .background(.regularMaterial)
-                .overlay(
-                    Circle()
-                        .stroke(isSelected ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.18), lineWidth: 1)
-                )
-                .clipShape(Circle())
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .position(x: midpoint.x, y: midpoint.y)
-        .onHover(perform: onHoverChanged)
-        .accessibilityLabel(edgeAccessibilityLabel)
-    }
-
-    private var edgeAccessibilityLabel: String {
-        let slots = slotNames.isEmpty ? "data dependency" : slotNames.joined(separator: ", ")
-        return "Inspect edge \(edge.from + 1) to \(edge.to + 1): \(slots)"
-    }
 }
 
 private func buildDataDagEdges(from steps: [SpecStep]) -> [DagEdge] {
@@ -2379,63 +2309,25 @@ private struct DagEdgeCanvas: View {
     let hoveredStepIndex: Int?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
-            let phase = CGFloat(timeline.date.timeIntervalSinceReferenceDate)
-            Canvas { context, _ in
-                for edge in edges {
-                    guard let geometry = layout.geometry(for: edge) else { continue }
-                    let edgeColor = strokeColor(for: edge)
-                    let lineWidth = strokeWidth(for: edge)
-                    context.stroke(
-                        geometry.path,
-                        with: .color(edgeColor),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-                    )
-                    drawFlowDots(
-                        in: &context,
-                        geometry: geometry,
-                        edge: edge,
-                        phase: phase,
-                        lineWidth: lineWidth
-                    )
-                    drawArrowHead(
-                        in: &context,
-                        tip: geometry.end,
-                        angle: geometry.arrowAngle,
-                        color: edgeColor
-                    )
-                }
+        Canvas { context, _ in
+            for edge in edges {
+                guard let geometry = layout.geometry(for: edge) else { continue }
+                let edgeColor = strokeColor(for: edge)
+                let lineWidth = strokeWidth(for: edge)
+                context.stroke(
+                    geometry.path,
+                    with: .color(edgeColor),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+                )
+                drawArrowHead(
+                    in: &context,
+                    tip: geometry.end,
+                    angle: geometry.arrowAngle,
+                    color: edgeColor
+                )
             }
         }
         .frame(width: layout.contentSize.width, height: layout.contentSize.height)
-    }
-
-    private func drawFlowDots(
-        in context: inout GraphicsContext,
-        geometry: DagEdgeGeometry,
-        edge: DagEdge,
-        phase: CGFloat,
-        lineWidth: CGFloat
-    ) {
-        let glowColor = flowGlowColor(for: edge)
-        let dotCount = edge.isSkip ? 1 : 2
-        let spacing: CGFloat = edge.isSkip ? 0.5 : 0.38
-        let speed: CGFloat = edge.isSkip ? 0.16 : 0.22
-        let dotRadius = max(0.7, lineWidth * 0.62)
-
-        for index in 0 ..< dotCount {
-            let progress = (phase * speed + CGFloat(index) * spacing).truncatingRemainder(dividingBy: 1)
-            let t = 0.08 + progress * 0.82
-            let point = geometry.point(at: t)
-
-            let dotRect = CGRect(
-                x: point.x - dotRadius,
-                y: point.y - dotRadius,
-                width: dotRadius * 2,
-                height: dotRadius * 2
-            )
-            context.fill(Path(ellipseIn: dotRect), with: .color(glowColor))
-        }
     }
 
     private func drawArrowHead(
@@ -2502,10 +2394,6 @@ private struct DagEdgeCanvas: View {
         return hoveredStepIndex != nil && !isIncident ? 0.22 : 1
     }
 
-    private func flowGlowColor(for edge: DagEdge) -> Color {
-        let opacityMultiplier = glowOpacity(for: edge)
-        return Color.white.opacity(0.88 * opacityMultiplier)
-    }
 }
 
 private struct DagGraphNode: View {
