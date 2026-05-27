@@ -72,6 +72,8 @@ struct ContentView: View {
     @State private var selected: FileNode?
     @State private var activeWorkspace: ZenithWorkspace?
     @State private var isTabOverviewPresented = false
+    @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) private var hubPathRoot: String = ""
 
     var body: some View {
         ZStack {
@@ -109,6 +111,15 @@ struct ContentView: View {
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: isTabOverviewPresented)
         .onAppear {
             tabOverviewGestureMonitor.start()
+            store.useEffectiveHubRoot(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
+        }
+        .onChange(of: hubArtifactMountsJSON) { newValue in
+            selected = nil
+            store.useEffectiveHubRoot(from: newValue, rootPath: hubPathRoot)
+        }
+        .onChange(of: hubPathRoot) { newValue in
+            selected = nil
+            store.useEffectiveHubRoot(from: hubArtifactMountsJSON, rootPath: newValue)
         }
         .onDisappear {
             tabOverviewGestureMonitor.stop()

@@ -60,6 +60,8 @@ struct SlotFileReference: Equatable, Identifiable {
     let artifactContentPath: String?
     let artifactContentURL: URL?
     let usesAdminArtifactAccess: Bool
+    let materializationURL: URL?
+    let materializationSourceLabel: String?
 
     var id: String { "\(resolutionState)-\(previewKind)-\(displayPath)" }
     var isReadableFile: Bool { [.localFile, .mountedFile].contains(resolutionState) && url?.isFileURL == true }
@@ -114,6 +116,24 @@ enum CaseInspectionModel {
         }
         (context.detail?.slots ?? []).map(\.name).forEach(append)
         return names
+    }
+
+    static func producedOutputSlots(context: CaseInspectionContext) -> [CaseSlotInspection] {
+        var names: [String] = []
+        var seen = Set<String>()
+
+        func append(_ name: String) {
+            guard !name.isEmpty, seen.insert(name).inserted else { return }
+            names.append(name)
+        }
+
+        for step in context.steps.sorted(by: { $0.number < $1.number }) {
+            step.outputs.map(\.name).forEach(append)
+        }
+        for slot in context.detail?.slots ?? [] where producerStep(for: slot.name, context: context) != nil {
+            append(slot.name)
+        }
+        return names.map { slotInspection(name: $0, context: context) }
     }
 
     static func slotInspection(name: String, context: CaseInspectionContext) -> CaseSlotInspection {
@@ -267,7 +287,7 @@ enum CaseInspectionModel {
 
     private static func decodeJSONValue(_ raw: String) -> Any? {
         guard let data = raw.data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data)
+        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
     private static func extractPath(from value: Any, allowArray: Bool) -> String? {
@@ -293,7 +313,9 @@ enum CaseInspectionModel {
     }
 
     private static func resolveFileReference(_ rawPath: String, kind: SlotValueKind, context: CaseInspectionContext) -> SlotFileReference? {
-        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = rawPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         guard !trimmed.isEmpty else { return nil }
         let pathWithoutFragment = trimmed.split(separator: "#", maxSplits: 1).first.map(String.init) ?? trimmed
         let decoded = pathWithoutFragment.removingPercentEncoding ?? pathWithoutFragment
@@ -315,7 +337,9 @@ enum CaseInspectionModel {
                 artifactID: nil,
                 artifactContentPath: nil,
                 artifactContentURL: nil,
-                usesAdminArtifactAccess: false
+                usesAdminArtifactAccess: false,
+                materializationURL: nil,
+                materializationSourceLabel: nil
             )
         }
 
@@ -329,15 +353,18 @@ enum CaseInspectionModel {
             : decoded
 
         if expanded.hasPrefix("/") {
+            if let hubFS = mirrorPathReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, context: context) {
+                return hubFS
+            }
+            if let artifact = artifactReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, context: context) {
+                return artifact
+            }
             let absoluteReference = localReference(for: URL(fileURLWithPath: expanded), rawPath: rawPath, defaultPreviewKind: defaultPreviewKind)
             if absoluteReference.resolutionState == .localFile {
                 return absoluteReference
             }
             if let mounted = mountedReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, mounts: context.artifactMounts) {
                 return mounted
-            }
-            if let artifact = artifactReference(forRuntimePath: expanded, rawPath: rawPath, defaultPreviewKind: defaultPreviewKind, context: context) {
-                return artifact
             }
             return absoluteReference
         }
@@ -359,7 +386,9 @@ enum CaseInspectionModel {
             artifactID: nil,
             artifactContentPath: nil,
             artifactContentURL: nil,
-            usesAdminArtifactAccess: false
+            usesAdminArtifactAccess: false,
+            materializationURL: nil,
+            materializationSourceLabel: nil
         )
     }
 
@@ -375,7 +404,9 @@ enum CaseInspectionModel {
             artifactID: nil,
             artifactContentPath: nil,
             artifactContentURL: nil,
-            usesAdminArtifactAccess: false
+            usesAdminArtifactAccess: false,
+            materializationURL: nil,
+            materializationSourceLabel: nil
         )
     }
 
@@ -386,6 +417,7 @@ enum CaseInspectionModel {
             ? "v1/admin/execution-artifacts/\(artifact.id)/content"
             : "execution-artifacts/\(artifact.id)/content"
         let contentURL = appendPath(contentPath, to: baseURL)
+        let materializationCandidate = HubArtifactMountResolver.candidate(runtimePath: runtimePath, mounts: context.artifactMounts)
         return SlotFileReference(
             rawValue: rawPath,
             url: nil,
@@ -396,7 +428,9 @@ enum CaseInspectionModel {
             artifactID: artifact.id,
             artifactContentPath: contentPath,
             artifactContentURL: contentURL,
-            usesAdminArtifactAccess: context.usesAdminArtifactAccess
+            usesAdminArtifactAccess: context.usesAdminArtifactAccess,
+            materializationURL: materializationCandidate?.fileURL,
+            materializationSourceLabel: materializationCandidate?.label
         )
     }
 
@@ -405,11 +439,26 @@ enum CaseInspectionModel {
         return context.detail?.artifacts.first { artifact in
             let uri = artifact.uri.trimmingCharacters(in: .whitespacesAndNewlines)
             let rawPath: String
-            if uri.hasPrefix("dir:") { rawPath = String(uri.dropFirst(4)) }
+            if uri.hasPrefix("dir:") {
+                rawPath = String(uri.dropFirst(4))
+                let artifactPath = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+                return normalizedRuntimePath == artifactPath || normalizedRuntimePath.hasPrefix(artifactPath + "/")
+            }
             else if uri.hasPrefix("file:") { rawPath = String(uri.dropFirst(5)) }
             else { return false }
             return URL(fileURLWithPath: rawPath).standardizedFileURL.path == normalizedRuntimePath
         }
+    }
+
+    private static func mirrorPathReference(forRuntimePath runtimePath: String, rawPath: String, defaultPreviewKind: FilePreviewKind, context: CaseInspectionContext) -> SlotFileReference? {
+        let normalizedRuntimePath = URL(fileURLWithPath: runtimePath).standardizedFileURL.path
+        return HubArtifactMirror.mirrorFileReference(
+            runtimePath: normalizedRuntimePath,
+            baseURL: context.artifactContentBaseURL,
+            usesAdminArtifactAccess: context.usesAdminArtifactAccess,
+            mounts: context.artifactMounts,
+            previewKind: previewKind(forPath: normalizedRuntimePath, defaultKind: defaultPreviewKind)
+        )
     }
 
     private static func appendPath(_ path: String, to baseURL: URL) -> URL {
@@ -418,6 +467,14 @@ enum CaseInspectionModel {
             url.appendPathComponent(String(component))
         }
         return url
+    }
+
+    private static func base64URLEncoded(_ value: String) -> String {
+        Data(value.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 
     private static func localReference(for url: URL, rawPath: String, defaultPreviewKind: FilePreviewKind) -> SlotFileReference {
@@ -433,7 +490,9 @@ enum CaseInspectionModel {
             artifactID: nil,
             artifactContentPath: nil,
             artifactContentURL: nil,
-            usesAdminArtifactAccess: false
+            usesAdminArtifactAccess: false,
+            materializationURL: nil,
+            materializationSourceLabel: nil
         )
     }
 

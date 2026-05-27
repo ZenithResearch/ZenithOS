@@ -46,6 +46,8 @@ final class HubStore: ObservableObject {
     @AppStorage("hubEnvPath")  var hubEnvPath: String = "/Users/bananawalnut/repos/hub/.env"
     @AppStorage("hubNamespace") var hubNamespace: String = ""
     @AppStorage("hubNodeURL") var hubNodeURL: String = ReviewAccessHubClient.defaultHubURL.absoluteString
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) var hubPathRoot: String = ""
+    @AppStorage(HubArtifactMount.userDefaultsKey) var hubArtifactMountsJSON: String = "[]"
 
     private let queueBase: String
 
@@ -60,11 +62,14 @@ final class HubStore: ObservableObject {
 
     var matrixUserId: String? { matrix.userId }
     var matrixLoggedIn: Bool  { matrix.isLoggedIn }
+    var effectiveHubPathRoot: URL {
+        HubRemoteAccess.localMirrorRoot(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
+    }
     var defaultHubNamespace: String {
-        Self.sanitizedNamespace(from: FileStore.hubRoot.lastPathComponent) ?? "hub"
+        HubRemoteAccess.namespace(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
     }
     var effectiveHubNamespace: String {
-        Self.sanitizedNamespace(from: hubNamespace) ?? defaultHubNamespace
+        return Self.sanitizedNamespace(from: hubNamespace) ?? defaultHubNamespace
     }
     var hubDisplayName: String { effectiveHubNamespace }
     var hubNodeBaseURL: URL {
@@ -94,8 +99,12 @@ final class HubStore: ObservableObject {
             hubOwnerMatrixId = ownerId
         }
         if hubNamespace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           HubArtifactMount.load(from: hubArtifactMountsJSON).isEmpty,
            let remoteNamespace = json["hub_namespace"] as? String,
            let sanitized = Self.sanitizedNamespace(from: remoteNamespace) {
+            // Keep the remote-reported Hub identity as a bootstrap fallback only.
+            // Once a local mirror is configured, effective identity is derived
+            // from the mirror root so ZenithOS has one access mechanism.
             hubNamespace = sanitized
         }
     }
@@ -291,7 +300,7 @@ final class HubStore: ObservableObject {
         }
     }
 
-    nonisolated private static func sanitizedNamespace(from raw: String) -> String? {
+    nonisolated static func sanitizedNamespace(from raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 

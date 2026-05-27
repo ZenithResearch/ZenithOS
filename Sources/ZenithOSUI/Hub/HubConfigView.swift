@@ -4,13 +4,17 @@ struct HubConfigView: View {
     @EnvironmentObject private var store: HubStore
     @State private var showLogin = false
     @State private var namespaceDraft = ""
+    @State private var hubPathRootDraft = ""
+    @State private var hubPathRootMessage: MountLocalRootMessage?
     @State private var hubNodeDraft = ""
     @State private var adminTokenDraft = ""
     @State private var mountRuntimePrefixDraft = ""
     @State private var mountLocalRootDraft = ""
     @State private var mountLabelDraft = ""
+    @State private var mountLocalRootMessage: MountLocalRootMessage?
     @State private var hasAdminToken = false
     @State private var adminTokenStatus: AdminTokenStatus = .idle
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) private var hubPathRoot: String = ""
     @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
 
     var body: some View {
@@ -21,8 +25,6 @@ struct HubConfigView: View {
                 hubNodeSection
                 Divider()
                 artifactMountsSection
-                Divider()
-                identitySection
                 Divider()
                 reviewAccessAdminSection
                 Divider()
@@ -44,6 +46,7 @@ struct HubConfigView: View {
         }
         .task {
             namespaceDraft = store.hubNamespace
+            hubPathRootDraft = store.hubPathRoot
             hubNodeDraft = store.hubNodeURL
             refreshAdminTokenStatus()
             await store.refresh()
@@ -102,135 +105,216 @@ struct HubConfigView: View {
         }
     }
 
-    // MARK: - Hub Artifact Mounts
+    // MARK: - Remote Hub Access
 
     private var artifactMountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Hub Artifact Mounts", icon: "externaldrive.connected.to.line.below")
+            SectionHeader(title: "Direct HubFS Access", icon: "externaldrive.connected.to.line.below")
+                .help("ZenithOS uses the active Hub's authenticated filesystem API first. Local paths are optional cache/dev fallback only.")
 
             HubCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Map Hub/runtime artifact prefixes to operator-readable mounted directories. Case slot previews use these explicit mappings after exact local paths and before Hub-served artifact fallback. No /data or Frank path is assumed unless you configure it here.")
+                    Text("ZenithOS reads Hub runtime paths through authenticated HubFS on the active Hub node. The current bridge uses the Review Access admin token temporarily; secs-magic will replace that auth layer later. Local roots below are optional cache/dev mirrors, not required production setup.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .help("HubFS is the source of truth. Service-level filesystems can later appear as distinct volumes; the Gateway-owned /data volume is the first direct HubFS volume.")
 
-                    if artifactMounts.isEmpty {
-                        Text("No artifact mounts configured.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(artifactMounts) { mount in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(mount.displayLabel)
-                                            .font(.caption.weight(.semibold))
-                                        Text("\(mount.normalizedRuntimePrefix) → \(mount.normalizedLocalRootURL.path)")
-                                            .font(.caption2.monospaced())
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-                                    Spacer(minLength: 0)
-                                    Button("Remove") { removeArtifactMount(mount) }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                }
-                                .padding(8)
-                                .background(Color.secondary.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
-                        }
-                    }
+                    localRootAndNamespaceControls
+
+                    remoteAccessIdentityPreview
 
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Add mount")
+                        Text("Accessible HubFS volumes")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        TextField("Runtime prefix, e.g. /data/frank_execution", text: $mountRuntimePrefixDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.body.monospaced())
-                        HStack(spacing: 8) {
-                            TextField("Mounted local root, e.g. /Volumes/hub-data/frank_execution", text: $mountLocalRootDraft)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.body.monospaced())
-                            Button("Browse") { browseArtifactMountLocalRoot() }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
-                        TextField("Label, optional", text: $mountLabelDraft)
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack(spacing: 8) {
-                            Button("Add Mount", action: addArtifactMount)
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .disabled(!canAddArtifactMount)
-                            Button("Clear") { clearArtifactMountDrafts() }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .disabled(mountRuntimePrefixDraft.isEmpty && mountLocalRootDraft.isEmpty && mountLabelDraft.isEmpty)
+                        ForEach(mirrorableDirectories) { directory in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Image(systemName: directory.systemImage)
+                                    .foregroundStyle(directory.isEnabled(in: artifactMounts) ? Color.accentColor : .secondary)
+                                    .frame(width: 18)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(directory.name)
+                                        .font(.caption.weight(.semibold))
+                                    Text(directory.runtimePrefix)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                    Text(directory.statusText(in: artifactMounts))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer(minLength: 0)
+                                Text("Active")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.12))
+                                    .clipShape(Capsule())
+                                    .help("Direct HubFS access for this volume is active on the Hub. A local root only adds optional cache/dev mirror behavior.")
+                            }
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var localRootAndNamespaceControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Optional local cache / dev mirror")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    TextField(FileStore.hubRoot.path, text: $hubPathRootDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                        .onChange(of: hubPathRootDraft) { _ in hubPathRootMessage = nil }
+                        .help("Optional local cache/dev mirror root. ZenithOS uses authenticated HubFS first; this path is only a local optimization or offline fallback.")
+                    Button("Browse") { browseHubPathRoot() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("Save Root") { saveHubPathRoot() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(!canSaveHubPathRoot)
+                    Button("Reset") { resetHubPathRoot() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(hubPathRootDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hubPathRoot.isEmpty)
+                }
+                rootStatusRow
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    TextField("namespace", text: $namespaceDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                        .onSubmit(saveNamespace)
+                        .help("Optional namespace override. Leave blank to derive it from the selected local root.")
+                    Button("Save Namespace", action: saveNamespace)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!canSaveNamespace)
+                    Button("Use Root Default") {
+                        store.resetHubNamespace()
+                        namespaceDraft = ""
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(store.hubNamespace.isEmpty && namespaceDraft.isEmpty)
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: namespaceStatusIcon)
+                    Text(namespaceStatusText)
+                }
+                .font(.caption2)
+                .foregroundStyle(namespaceStatusColor)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var rootStatusRow: some View {
+        if let hubPathRootMessage {
+            HStack(spacing: 6) {
+                Image(systemName: hubPathRootMessage.icon)
+                Text(hubPathRootMessage.text)
+            }
+            .font(.caption2)
+            .foregroundStyle(hubPathRootMessage.color)
+        } else {
+            Text("Local cache: \(HubRemoteAccess.selectedRoot(from: hubPathRootDraft.isEmpty ? hubPathRoot : hubPathRootDraft).path). HubFS remains primary; /data attaches here only when using local cache/dev mirror fallback.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private var localMountDirectoryStatusRow: some View {
+        if trimmedMountLocalRootDraft.isEmpty {
+            Text("Browse to an existing local mirror root, or type a new absolute directory path and create it. This directory becomes ZenithOS's effective Hub root and namespace source when saved.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .help("The local directory is where ZenithOS will look for files after replacing the Hub/runtime prefix. It can be an existing mount point or a directory you create now.")
+        } else if let mountLocalRootMessage {
+            HStack(spacing: 6) {
+                Image(systemName: mountLocalRootMessage.icon)
+                Text(mountLocalRootMessage.text)
+            }
+            .font(.caption2)
+            .foregroundStyle(mountLocalRootMessage.color)
+            .help("Status for the currently entered local mirror directory.")
+        } else if mountLocalRootExists {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Directory exists and can be used as the local mirror target.")
+            }
+            .font(.caption2)
+            .foregroundStyle(.green)
+            .help("The local path exists and is a directory, so it can be saved as the destination for this mount mapping.")
+        } else if mountLocalRootCanCreate {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.badge.plus")
+                Text("Directory does not exist yet. Create it before adding the mount.")
+            }
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .help("The local path is absolute but does not exist yet. Use Create to make it before saving the mount.")
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("Enter an absolute local directory path.")
+            }
+            .font(.caption2)
+            .foregroundStyle(.red)
+            .help("Local mirror directories must be absolute paths. They are optional in the simple mirrorable-directory flow.")
         }
     }
 
     // MARK: - Identity
 
-    private var identitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Identity", icon: "at")
-
-            HubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Namespace")
-                        .font(.subheadline.weight(.semibold))
-
-                    Text("This is the stable root name for the hub. ZenithOS uses it as the visible hub root, and it becomes the unique hub ID if you later register with the network registry.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack(alignment: .top, spacing: 10) {
-                        TextField(store.defaultHubNamespace, text: $namespaceDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.body.monospaced())
-                            .onSubmit(saveNamespace)
-
-                        Button("Save", action: saveNamespace)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(!canSaveNamespace)
-
-                        Button("Reset") {
-                            store.resetHubNamespace()
-                            namespaceDraft = ""
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(store.hubNamespace.isEmpty && namespaceDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    HStack(spacing: 8) {
-                        Image(systemName: namespaceStatusIcon)
-                            .foregroundStyle(namespaceStatusColor)
-                        Text(namespaceStatusText)
-                            .font(.caption)
-                            .foregroundStyle(namespaceStatusColor)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        IdentityPreviewRow(label: "Effective root", value: effectiveNamespacePreview)
-                        IdentityPreviewRow(label: "Bucket route", value: "\(effectiveNamespacePreview)/buckets/{name}")
-                        IdentityPreviewRow(label: "Registry ID", value: effectiveNamespacePreview)
-                    }
-                }
+    private var remoteAccessIdentityPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .foregroundStyle(Color.accentColor)
+                Text("Authenticated HubFS")
+                    .font(.subheadline.weight(.semibold))
+            }
+            Text("Mirror eligibility is directory-based. A local mirror root is optional; when absent, ZenithOS uses Hub-served artifact content instead of inventing a filesystem root.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                IdentityPreviewRow(label: "Active Hub", value: store.hubNodeBaseURL.absoluteString)
+                IdentityPreviewRow(label: "Local mirror root", value: effectiveHubPathRootPreview)
+                IdentityPreviewRow(label: "Effective namespace", value: store.effectiveHubNamespace)
+                IdentityPreviewRow(label: "Mirrorable dirs", value: HubRemoteAccess.routeDescription(from: hubArtifactMountsJSON))
+                IdentityPreviewRow(label: "Registry ID", value: store.effectiveHubNamespace)
             }
         }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
+
+    // Standalone identity editing intentionally removed: effective identity is part of Remote Hub Access.
 
 
     // MARK: - Review Access Admin
@@ -510,13 +594,37 @@ struct HubConfigView: View {
         namespacePreview ?? store.defaultHubNamespace
     }
 
+    private var effectiveHubPathRootPreview: String {
+        HubRemoteAccess.localMirrorRoot(from: hubArtifactMountsJSON, rootPath: hubPathRoot).path
+    }
+
+    private var trimmedHubPathRootDraft: String {
+        hubPathRootDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var expandedHubPathRootDraft: String {
+        guard !trimmedHubPathRootDraft.isEmpty else { return "" }
+        return NSString(string: trimmedHubPathRootDraft).expandingTildeInPath
+    }
+
+    private var hubPathRootExists: Bool {
+        guard !expandedHubPathRootDraft.isEmpty else { return true }
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expandedHubPathRootDraft, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
+    }
+
+    private var canSaveHubPathRoot: Bool {
+        trimmedHubPathRootDraft.isEmpty || (expandedHubPathRootDraft.hasPrefix("/") && hubPathRootExists)
+    }
+
     private var canSaveNamespace: Bool {
         trimmedNamespaceDraft.isEmpty || namespacePreview != nil
     }
 
     private var namespaceStatusText: String {
         if trimmedNamespaceDraft.isEmpty {
-            return "Using the default namespace derived from the local hub root: \(store.defaultHubNamespace)"
+            return "Using the default namespace derived from the selected local root: \(store.defaultHubNamespace)"
         }
         guard let namespacePreview else {
             return "Use at least one letter or number. Only lowercase letters, numbers, and hyphens are kept."
@@ -541,20 +649,50 @@ struct HubConfigView: View {
         return namespacePreview == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
     }
 
+    private let mirrorableDirectories = [
+        MirrorableHubDirectory(
+            name: "Data",
+            runtimePrefix: "/data",
+            label: "Data",
+            systemImage: "externaldrive"
+        ),
+    ]
+
     private var artifactMounts: [HubArtifactMount] {
-        HubArtifactMount.load(from: hubArtifactMountsJSON)
+        HubRemoteAccess.mappings(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
     }
 
     private var trimmedMountRuntimePrefixDraft: String {
         mountRuntimePrefixDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var normalizedMountRuntimePrefixDraft: String {
+        HubArtifactMount.normalizeRuntimePrefix(trimmedMountRuntimePrefixDraft)
+    }
+
     private var trimmedMountLocalRootDraft: String {
         mountLocalRootDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var expandedMountLocalRootDraft: String {
+        guard !trimmedMountLocalRootDraft.isEmpty else { return "" }
+        return NSString(string: trimmedMountLocalRootDraft).expandingTildeInPath
+    }
+
+    private var mountLocalRootExists: Bool {
+        guard !expandedMountLocalRootDraft.isEmpty else { return false }
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expandedMountLocalRootDraft, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
+    }
+
+    private var mountLocalRootCanCreate: Bool {
+        guard !expandedMountLocalRootDraft.isEmpty, expandedMountLocalRootDraft.hasPrefix("/") else { return false }
+        return !mountLocalRootExists
+    }
+
     private var canAddArtifactMount: Bool {
-        !HubArtifactMount.normalizeRuntimePrefix(trimmedMountRuntimePrefixDraft).isEmpty && !trimmedMountLocalRootDraft.isEmpty
+        !normalizedMountRuntimePrefixDraft.isEmpty && mountLocalRootExists
     }
 
     private var trimmedAdminTokenDraft: String {
@@ -607,15 +745,28 @@ struct HubConfigView: View {
         }
     }
 
+    private func setMirrorableDirectory(_ directory: MirrorableHubDirectory, enabled: Bool) {
+        let normalizedPrefix = HubArtifactMount.normalizeRuntimePrefix(directory.runtimePrefix)
+        var next = artifactMounts.filter { $0.normalizedRuntimePrefix != normalizedPrefix }
+        if enabled {
+            next.append(HubArtifactMount(runtimePrefix: normalizedPrefix, localRoot: "", label: directory.label))
+        }
+        hubArtifactMountsJSON = HubArtifactMount.encode(HubArtifactMount.normalized(next))
+        store.resetHubNamespace()
+        namespaceDraft = ""
+    }
+
     private func addArtifactMount() {
         guard canAddArtifactMount else { return }
         let mount = HubArtifactMount(
-            runtimePrefix: trimmedMountRuntimePrefixDraft,
-            localRoot: trimmedMountLocalRootDraft,
+            runtimePrefix: normalizedMountRuntimePrefixDraft,
+            localRoot: expandedMountLocalRootDraft,
             label: mountLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         let next = HubArtifactMount.normalized(artifactMounts.filter { $0.normalizedRuntimePrefix != mount.normalizedRuntimePrefix } + [mount])
         hubArtifactMountsJSON = HubArtifactMount.encode(next)
+        store.resetHubNamespace()
+        namespaceDraft = ""
         clearArtifactMountDrafts()
     }
 
@@ -628,22 +779,67 @@ struct HubConfigView: View {
         mountRuntimePrefixDraft = ""
         mountLocalRootDraft = ""
         mountLabelDraft = ""
+        mountLocalRootMessage = nil
     }
 
     private func browseArtifactMountLocalRoot() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Select Artifact Root"
+        panel.prompt = "Select Mount Directory"
         if panel.runModal() == .OK, let url = panel.url {
             mountLocalRootDraft = url.path
+            mountLocalRootMessage = .success("Selected local mirror directory.")
+        }
+    }
+
+    private func createArtifactMountLocalRoot() {
+        guard mountLocalRootCanCreate else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: expandedMountLocalRootDraft),
+                withIntermediateDirectories: true
+            )
+            mountLocalRootDraft = expandedMountLocalRootDraft
+            mountLocalRootMessage = .success("Created local mirror directory.")
+        } catch {
+            mountLocalRootMessage = .failure("Could not create directory: \(error.localizedDescription)")
         }
     }
 
     private func saveNamespace() {
         store.saveHubNamespace(namespaceDraft)
         namespaceDraft = store.hubNamespace
+    }
+
+    private func browseHubPathRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select Hub Root"
+        if panel.runModal() == .OK, let url = panel.url {
+            hubPathRootDraft = url.path
+            hubPathRootMessage = .success("Selected local Hub root.")
+        }
+    }
+
+    private func saveHubPathRoot() {
+        guard canSaveHubPathRoot else { return }
+        hubPathRoot = expandedHubPathRootDraft
+        store.hubPathRoot = expandedHubPathRootDraft
+        hubPathRootDraft = expandedHubPathRootDraft
+        hubPathRootMessage = .success(trimmedHubPathRootDraft.isEmpty ? "Using fallback Hub root." : "Saved local Hub root.")
+    }
+
+    private func resetHubPathRoot() {
+        hubPathRoot = ""
+        store.hubPathRoot = ""
+        hubPathRootDraft = ""
+        hubPathRootMessage = .success("Reset to fallback Hub root.")
     }
 
     private func saveHubNodeURL() {
@@ -658,6 +854,55 @@ private enum AdminTokenStatus: Equatable {
     case updatedOnHub
     case deleted
     case failed(String)
+}
+
+private enum MountLocalRootMessage: Equatable {
+    case success(String)
+    case failure(String)
+
+    var text: String {
+        switch self {
+        case .success(let message), .failure(let message): return message
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .success: return "checkmark.circle.fill"
+        case .failure: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .success: return .green
+        case .failure: return .red
+        }
+    }
+}
+
+private struct MirrorableHubDirectory: Identifiable {
+    var id: String { runtimePrefix }
+    let name: String
+    let runtimePrefix: String
+    let label: String
+    let systemImage: String
+
+    func isEnabled(in mounts: [HubArtifactMount]) -> Bool {
+        let normalizedPrefix = HubArtifactMount.normalizeRuntimePrefix(runtimePrefix)
+        return mounts.contains { $0.normalizedRuntimePrefix == normalizedPrefix }
+    }
+
+    func statusText(in mounts: [HubArtifactMount]) -> String {
+        let normalizedPrefix = HubArtifactMount.normalizeRuntimePrefix(runtimePrefix)
+        guard let mount = mounts.first(where: { $0.normalizedRuntimePrefix == normalizedPrefix }) else {
+            return "Disabled. Paths under this Hub directory are not mirror-eligible."
+        }
+        if mount.hasLocalRoot {
+            return "Enabled with local mirror root: \(mount.normalizedLocalRootURL.path)"
+        }
+        return "Enabled. No local root is required; ZenithOS will use Hub-served artifact content when available."
+    }
 }
 
 // MARK: - Sub-components

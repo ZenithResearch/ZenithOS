@@ -139,6 +139,7 @@ enum ReviewAccessHubClientError: LocalizedError {
     case missingAdminToken
     case badURL
     case http(Int, String)
+    case adminHTTP(Int, String, String)
     case rawCodeMissing
     case secretsPrinted
     case keychainWriteFailed(OSStatus)
@@ -155,6 +156,8 @@ enum ReviewAccessHubClientError: LocalizedError {
                 return "Hub returned HTTP 404: \(body). This Hub does not expose the Review Access admin endpoint yet; deploy/restart the Hub with the latest gateway before verifying or setting the token from ZenithOS."
             }
             return "Hub returned HTTP \(status): \(body)"
+        case .adminHTTP(let status, let body, let path):
+            return Self.adminHTTPDescription(status: status, body: body, path: path)
         case .rawCodeMissing:
             return "Hub did not return a generated raw code."
         case .secretsPrinted:
@@ -164,6 +167,36 @@ enum ReviewAccessHubClientError: LocalizedError {
         case .keychainDeleteFailed(let status):
             return "Could not delete Review Access admin token from Keychain (status \(status))."
         }
+    }
+
+    private static func adminHTTPDescription(status: Int, body: String, path: String) -> String {
+        let prefix = "Hub returned HTTP \(status) for /\(path): \(body)."
+        if path.hasPrefix("v1/admin/fs/") {
+            if body.contains("outside_namespace") {
+                return "\(prefix) HubFS rejected this path because it is outside the authenticated Gateway-owned filesystem volumes."
+            }
+            if body.contains("not_found") {
+                return "\(prefix) HubFS is live, but the Gateway-owned backing volume does not contain this path. Service-level filesystems are separate volumes until explicitly attached to HubFS."
+            }
+            if body.contains("is_directory") {
+                return "\(prefix) HubFS is live, but this path is a directory; use list or manifest instead of content."
+            }
+            return "\(prefix) This Hub does not expose the HubFS endpoint yet; deploy/restart Gateway with the HubFS routes before verifying direct Hub filesystem access from ZenithOS."
+        }
+        guard status == 404 else { return prefix }
+        if path.hasPrefix("v1/admin/mirror/files/") {
+            if body.contains("mirror backing file not found") {
+                return "\(prefix) The Hub mirror endpoint exists, but the backing file is not present under the configured mirror roots."
+            }
+            return "\(prefix) This Hub does not expose the mirror file content endpoint yet; deploy/restart Gateway and Cases with the artifact mirror endpoints before previewing remote /data files from ZenithOS."
+        }
+        if path.hasPrefix("v1/admin/execution-artifacts/") || path.contains("/artifacts/") {
+            return "\(prefix) This Hub does not expose the execution artifact content endpoint yet, or the requested registered artifact is not available on this Hub."
+        }
+        if path.hasPrefix("v1/admin/review-auth/") {
+            return "\(prefix) This Hub does not expose the Review Access admin endpoint yet; deploy/restart the Hub with the latest gateway before verifying or setting the token from ZenithOS."
+        }
+        return prefix
     }
 }
 
@@ -271,7 +304,7 @@ final class ReviewAccessHubClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw ReviewAccessHubClientError.http(http.statusCode, body)
+            throw ReviewAccessHubClientError.adminHTTP(http.statusCode, body, path)
         }
         return data
     }

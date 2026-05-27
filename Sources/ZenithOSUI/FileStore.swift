@@ -12,17 +12,37 @@ final class FileStore: ObservableObject {
     @Published private(set) var rootNodes: [FileNode] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String? = nil
+    @Published private(set) var root: URL
 
-    let root = FileStore.hubRoot
+    init(root: URL = FileStore.effectiveHubRoot()) {
+        self.root = root
+        load()
+    }
 
-    init() { load() }
+    func useEffectiveHubRoot(
+        from mountsJSON: String = UserDefaults.standard.string(forKey: HubArtifactMount.userDefaultsKey) ?? "[]",
+        rootPath: String = UserDefaults.standard.string(forKey: HubRemoteAccess.localRootUserDefaultsKey) ?? ""
+    ) {
+        let nextRoot = Self.effectiveHubRoot(mountsJSON: mountsJSON, rootPath: rootPath)
+        guard nextRoot != root else { return }
+        root = nextRoot
+        load()
+    }
+
+    nonisolated static func effectiveHubRoot(
+        mountsJSON: String = UserDefaults.standard.string(forKey: HubArtifactMount.userDefaultsKey) ?? "[]",
+        rootPath: String = UserDefaults.standard.string(forKey: HubRemoteAccess.localRootUserDefaultsKey) ?? ""
+    ) -> URL {
+        HubRemoteAccess.localMirrorRoot(from: mountsJSON, rootPath: rootPath)
+    }
 
     func load() {
         isLoading = true
         errorMessage = nil
+        let scanRoot = root
         Task.detached(priority: .userInitiated) {
             var err: String? = nil
-            let nodes = Self.scan(url: Self.hubRoot, error: &err)
+            let nodes = Self.scan(url: scanRoot, error: &err)
             let captured = err
             await MainActor.run {
                 self.rootNodes = nodes
