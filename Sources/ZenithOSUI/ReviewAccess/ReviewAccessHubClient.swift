@@ -208,6 +208,18 @@ final class ReviewAccessHubClient {
     private let baseURL: URL
     private let session: URLSession
 
+    private static func safeErrorBody(from data: Data) -> String {
+        guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+            return "redacted empty response"
+        }
+        let lowered = text.lowercased()
+        let sensitiveMarkers = ["token", "secret", "password", "access_code", "authorization", "bearer", "raw_code"]
+        guard !sensitiveMarkers.contains(where: { lowered.contains($0) }) else {
+            return "redacted response body"
+        }
+        return String(text.prefix(300))
+    }
+
     init(baseURL: URL = ReviewAccessHubClient.defaultHubURL, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.session = session
@@ -235,8 +247,7 @@ final class ReviewAccessHubClient {
             throw ReviewAccessHubClientError.http(0, "Non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ReviewAccessHubClientError.http(http.statusCode, body)
+            throw ReviewAccessHubClientError.http(http.statusCode, Self.safeErrorBody(from: data))
         }
         let decoded = try JSONDecoder.reviewAccessHub.decode(ReviewAccessCapabilitiesResponse.self, from: data)
         if decoded.secretsPrinted {
@@ -264,8 +275,7 @@ final class ReviewAccessHubClient {
             throw ReviewAccessHubClientError.http(0, "Non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ReviewAccessHubClientError.http(http.statusCode, body)
+            throw ReviewAccessHubClientError.http(http.statusCode, Self.safeErrorBody(from: data))
         }
         let decoded = try JSONDecoder.reviewAccessHub.decode(ReviewAccessAdminTokenUpdateResponse.self, from: data)
         if decoded.secretsPrinted {
@@ -303,8 +313,7 @@ final class ReviewAccessHubClient {
             throw ReviewAccessHubClientError.http(0, "Non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ReviewAccessHubClientError.adminHTTP(http.statusCode, body, path)
+            throw ReviewAccessHubClientError.adminHTTP(http.statusCode, Self.safeErrorBody(from: data), path)
         }
         return data
     }
@@ -326,8 +335,7 @@ final class ReviewAccessHubClient {
             throw ReviewAccessHubClientError.http(0, "Non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ReviewAccessHubClientError.http(http.statusCode, body)
+            throw ReviewAccessHubClientError.http(http.statusCode, Self.safeErrorBody(from: data))
         }
         let decoded = try JSONDecoder.reviewAccessHub.decode(ReviewAccessRotateResponse.self, from: data)
         if decoded.secretsPrinted {

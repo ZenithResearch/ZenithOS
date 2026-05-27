@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import CryptoKit
 
 private enum ReviewAccessOperationMode: String, CaseIterable, Identifiable {
     case replaceExisting
@@ -1133,7 +1132,6 @@ struct ReviewAccessView: View {
         payload: ReviewAccessRotateRequest,
         adminToken token: String
     ) -> String {
-        let tokenHashPrefix = token.isEmpty ? "n/a" : sha256Prefix(token)
         let policyLines = payload.policies.enumerated().flatMap { index, policy in
             [
                 "policy[\(index)].deployment_id=\(policy.deploymentID)",
@@ -1150,8 +1148,7 @@ struct ReviewAccessView: View {
             "keychain_service=\(ReviewAccessHubClient.keychainService)",
             "keychain_account=\(ReviewAccessHubClient.keychainAccount)",
             "admin_token_present=\(!token.isEmpty)",
-            "admin_token_length=\(token.count)",
-            "admin_token_sha256_prefix=\(tokenHashPrefix)",
+            "admin_token_value=redacted",
             "operation_mode=\(effectiveOperationMode.rawValue)",
             "mode=\(mode.rawValue)",
             "raw_access_code_in_payload=\(payload.accessCode == nil ? "absent" : "present-redacted")",
@@ -1173,10 +1170,6 @@ struct ReviewAccessView: View {
         ] + policyLines).joined(separator: "\n")
     }
 
-    private func sha256Prefix(_ value: String) -> String {
-        let digest = SHA256.hash(data: Data(value.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined().prefix(12).description
-    }
 
     @ViewBuilder
     private func metadataSummary(for config: ReviewAccessConfig) -> some View {

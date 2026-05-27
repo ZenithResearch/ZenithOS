@@ -7,7 +7,9 @@ private let skipNames: Set<String> = [
 
 @MainActor
 final class FileStore: ObservableObject {
-    nonisolated static let hubRoot = URL(fileURLWithPath: "/Users/bananawalnut/hub").resolvingSymlinksInPath()
+    nonisolated static let hubRoot = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("claude-hub", isDirectory: true)
+        .resolvingSymlinksInPath()
 
     @Published private(set) var rootNodes: [FileNode] = []
     @Published private(set) var isLoading = false

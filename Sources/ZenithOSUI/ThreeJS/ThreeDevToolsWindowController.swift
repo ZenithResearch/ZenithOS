@@ -140,7 +140,11 @@ final class ThreeNavStore: ObservableObject {
     let webView:    WKWebView
     let serverMgr:  DevServerManager
 
-    @AppStorage("vaultPath") private var vaultPath: String = "/Users/bananawalnut/vault"
+    private static let defaultVaultPath = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("claude-hub", isDirectory: true)
+        .path
+
+    @AppStorage("vaultPath") private var vaultPath: String = ThreeNavStore.defaultVaultPath
 
     init(webView: WKWebView, serverMgr: DevServerManager) {
         self.webView   = webView

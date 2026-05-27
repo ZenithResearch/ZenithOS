@@ -15,7 +15,7 @@ final class TodoStore: ObservableObject {
 
     private let vaultRoot: URL
 
-    init(vaultRoot: URL = URL(fileURLWithPath: "/Users/bananawalnut/claude-hub")) {
+    init(vaultRoot: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("claude-hub", isDirectory: true)) {
         self.vaultRoot = vaultRoot
     }
 

@@ -22,7 +22,7 @@ Menu bar app for the ZenithOS local environment. Runs once at login, lives in th
 ### Option A — Swift CLI (no full Xcode needed)
 
 ```bash
-cd /Users/bananawalnut/hub/repos/workspace/ZenithOS
+cd ~/repos/ZenithOS
 swift build -c release
 .build/release/ZenithOS
 ```

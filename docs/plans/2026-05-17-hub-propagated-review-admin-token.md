@@ -25,8 +25,8 @@
 **Objective:** Allow an operator to set the Review Access admin token on the active Hub node.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/hub/services/gateway_http/app.py`
-- Test: `/Users/bananawalnut/repos/hub/tests/test_gateway_http_sessions.py`
+- Modify: `../hub/services/gateway_http/app.py`
+- Test: `../hub/tests/test_gateway_http_sessions.py`
 
 **Rules:**
 - `PUT /v1/admin/review-auth/admin-token`
@@ -41,7 +41,7 @@
 **Objective:** Ensure a token set through the Hub endpoint is immediately accepted by the same running gateway.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/hub/services/gateway_http/app.py`
+- Modify: `../hub/services/gateway_http/app.py`
 
 **Rules:**
 - `_require_review_access_admin()` must use the effective token from config secrets if present.
@@ -53,8 +53,8 @@
 **Objective:** Let ZenithOS propagate a new admin token to the active Hub node.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift`
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/Hub/HubStore.swift`
+- Modify: `./Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift`
+- Modify: `./Sources/ZenithOSUI/Hub/HubStore.swift`
 
 **Rules:**
 - Add `updateAdminTokenOnHub(newToken:currentToken:)`.
@@ -67,7 +67,7 @@
 **Objective:** Make the “first phone setup” path obvious.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/Hub/HubConfigView.swift`
+- Modify: `./Sources/ZenithOSUI/Hub/HubConfigView.swift`
 
 **Rules:**
 - Keep “Save Local Credential” for importing an already-existing Hub credential.
@@ -81,10 +81,10 @@
 
 **Commands:**
 ```bash
-cd /Users/bananawalnut/repos/hub
+cd ../hub
 .venv/bin/pytest tests/test_gateway_http_sessions.py -q
 
-cd /Users/bananawalnut/repos/ZenithOS
+cd .
 swift build -c debug --product ZenithOSUI
 git checkout -- .build ZenithOS.app
 ```

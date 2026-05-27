@@ -25,8 +25,8 @@
 **Objective:** Add a safe GET endpoint that returns authenticated Review Access admin capability metadata without rotating access codes.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/hub/services/gateway_http/app.py`
-- Test: `/Users/bananawalnut/repos/hub/tests/test_gateway_http_sessions.py`
+- Modify: `../hub/services/gateway_http/app.py`
+- Test: `../hub/tests/test_gateway_http_sessions.py`
 
 **Steps:**
 1. Add a Pydantic output model with fields: `ok`, `hub`, `capabilities`, `secrets_printed`.
@@ -40,7 +40,7 @@
 **Objective:** Stop hardcoding the Hub URL as the only possible target and add non-mutating verification.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift`
+- Modify: `./Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift`
 
 **Steps:**
 1. Keep `defaultHubURL` as the default node URL.
@@ -53,7 +53,7 @@
 **Objective:** Create a single app-level source of truth for the bound Hub node used by Review Access.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/Hub/HubStore.swift`
+- Modify: `./Sources/ZenithOSUI/Hub/HubStore.swift`
 
 **Steps:**
 1. Add `@AppStorage("hubNodeURL")` defaulting to `https://hub.zenith-research.ca`.
@@ -67,8 +67,8 @@
 **Objective:** Make the UI say that saving a token only updates the local credential for the selected Hub, while verification proves the deployed Hub accepts it.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/Hub/HubConfigView.swift`
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/ContentView.swift`
+- Modify: `./Sources/ZenithOSUI/Hub/HubConfigView.swift`
+- Modify: `./Sources/ZenithOSUI/ContentView.swift`
 
 **Steps:**
 1. Rename visible navigation from Hub Settings to Hub Connection.
@@ -82,7 +82,7 @@
 **Objective:** Prevent Review Access rotation when the active Hub node has not accepted the admin credential.
 
 **Files:**
-- Modify: `/Users/bananawalnut/repos/ZenithOS/Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift`
+- Modify: `./Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift`
 
 **Steps:**
 1. Add a top Hub Connection card showing `hub.hubNodeURL`, verification status, and capabilities.
@@ -97,10 +97,10 @@
 
 **Commands:**
 ```bash
-cd /Users/bananawalnut/repos/hub
+cd ../hub
 .venv/bin/pytest tests/test_gateway_http_sessions.py -q
 
-cd /Users/bananawalnut/repos/ZenithOS
+cd .
 swift build -c debug --product ZenithOSUI
 git checkout -- .build ZenithOS.app
 ```

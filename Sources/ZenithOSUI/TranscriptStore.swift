@@ -23,7 +23,8 @@ final class TranscriptStore: ObservableObject {
     @Published private(set) var entries: [TranscriptEntry] = []
     @Published private(set) var isLoading = false
 
-    private let dir = URL(fileURLWithPath: "/Users/bananawalnut/hub/capture/transcripts")
+    private let dir = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("claude-hub/capture/transcripts", isDirectory: true)
     private var watcher: DispatchSourceFileSystemObject?
 
     init() {

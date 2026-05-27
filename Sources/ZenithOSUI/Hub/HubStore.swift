@@ -42,8 +42,15 @@ final class HubStore: ObservableObject {
 
     let matrix: MatrixClient
 
-    @AppStorage("vaultPath")   var vaultPath: String = "/Users/bananawalnut/vault"
-    @AppStorage("hubEnvPath")  var hubEnvPath: String = "/Users/bananawalnut/repos/hub/.env"
+    private static let defaultVaultPath = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("claude-hub", isDirectory: true)
+        .path
+    private static let defaultHubEnvPath = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("repos/hub/.env", isDirectory: false)
+        .path
+
+    @AppStorage("vaultPath")   var vaultPath: String = HubStore.defaultVaultPath
+    @AppStorage("hubEnvPath")  var hubEnvPath: String = HubStore.defaultHubEnvPath
     @AppStorage("hubNamespace") var hubNamespace: String = ""
     @AppStorage("hubNodeURL") var hubNodeURL: String = ReviewAccessHubClient.defaultHubURL.absoluteString
     @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) var hubPathRoot: String = ""
@@ -202,7 +209,7 @@ final class HubStore: ObservableObject {
         let env = EnvFile.load(at: hubEnvPath)
         guard let asToken = env["SOPHIA_AS_TOKEN"],
               let matrixUser = env["SOPHIA_MATRIX_USER"] else {
-            sophiaError = "SOPHIA_AS_TOKEN / SOPHIA_MATRIX_USER not found in \(hubEnvPath)"
+            sophiaError = "SOPHIA_AS_TOKEN / SOPHIA_MATRIX_USER not found in the configured Hub environment file."
             return
         }
         sophia.setAsCredentials(token: asToken, userId: matrixUser)

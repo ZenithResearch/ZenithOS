@@ -2,7 +2,8 @@ import Foundation
 
 enum VaultConfig {
     /// Root of the ZenithOS/personal hub vault on this machine.
-    static let hubRoot = URL(fileURLWithPath: "/Users/bananawalnut/claude-hub")
+    static let hubRoot = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("claude-hub", isDirectory: true)
 
     /// Capture inbox for FaceTime transcripts — picked up by /extract during sessions.
     static let transcriptsDir = hubRoot

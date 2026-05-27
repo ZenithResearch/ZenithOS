@@ -8,7 +8,7 @@
 
 **Tech Stack:** SwiftUI, AppKit clipboard integration, existing `ReviewAccessConfig`, `ReviewAccessStore`, and `ReviewAccessHubClient` types in ZenithOS.
 
-**Screenshot / prompt reference:** `/private/var/folders/yx/nh1709b124jgjrw1k3bydds80000gn/T/TemporaryItems/NSIRD_screencaptureui_AnkJAN/Screenshot 2026-05-17 at 2.26.31\u202fPM.png`
+**Screenshot / prompt reference:** `<local screenshot path redacted>`
 
 ---
 

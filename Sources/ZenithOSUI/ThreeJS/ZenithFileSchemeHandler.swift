@@ -2,7 +2,8 @@ import Foundation
 import WebKit
 
 /// Serves local files to WKWebView under the `zenith-file://` custom scheme.
-/// URL format: `zenith-file:///absolute/path/to/file.glb`
+/// URL format: `zenith-file:///absolute/path/to/file.glb`.
+/// Requests are bounded to the app-opened file sandbox or the user's home directory.
 final class ZenithFileSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private static let formsDiagnosticFileNames: Set<String> = [
@@ -47,10 +48,15 @@ final class ZenithFileSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
-        // The path is encoded in the URL's path component
-        let filePath = url.path   // e.g. /Users/.../scene.glb
-
-        let fileURL = URL(fileURLWithPath: filePath)
+        let filePath = url.path
+        let fileURL = URL(fileURLWithPath: filePath).standardizedFileURL
+        guard Self.isAllowedFileURL(fileURL) else {
+            urlSchemeTask.didFailWithError(
+                NSError(domain: "ZenithFileSchemeHandler",
+                        code: -2,
+                        userInfo: [NSLocalizedDescriptionKey: "Requested file is outside allowed local roots"]))
+            return
+        }
         let ext = fileURL.pathExtension.lowercased()
         let mime = Self.mimeTypes[ext] ?? "application/octet-stream"
 
@@ -78,9 +84,16 @@ final class ZenithFileSchemeHandler: NSObject, WKURLSchemeHandler {
             urlSchemeTask.didReceive(data)
             urlSchemeTask.didFinish()
         } catch {
-            NSLog("FormsFileServeDiagnostics error=%@ url=%@ path=%@", String(describing: error), url.absoluteString, fileURL.path)
+            NSLog("FormsFileServeDiagnostics error=%@ file=%@", String(describing: error), fileURL.lastPathComponent)
             urlSchemeTask.didFailWithError(error)
         }
+    }
+
+    private static func isAllowedFileURL(_ fileURL: URL) -> Bool {
+        let path = fileURL.standardizedFileURL.path
+        let home = URL(fileURLWithPath: NSHomeDirectory()).standardizedFileURL.path
+        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        return path == home || path.hasPrefix(home + "/") || path.hasPrefix(temporary)
     }
 
     func webView(_ webView: WKWebView,
@@ -90,7 +103,7 @@ final class ZenithFileSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private func logFormsFileServe(fileURL: URL, requestURL: URL, byteCount: Int) {
         guard Self.formsDiagnosticFileNames.contains(fileURL.lastPathComponent),
-              fileURL.path.contains("/claude-hub/repos/workspace/Forms/") else {
+              fileURL.path.contains("/repos/workspace/Forms/") else {
             return
         }
 
@@ -98,11 +111,10 @@ final class ZenithFileSchemeHandler: NSObject, WKURLSchemeHandler {
             .map { ISO8601DateFormatter().string(from: $0) } ?? "unknown"
 
         NSLog(
-            "FormsFileServeDiagnostics path=%@ bytes=%d modified=%@ url=%@",
-            fileURL.path,
+            "FormsFileServeDiagnostics file=%@ bytes=%d modified=%@",
+            fileURL.lastPathComponent,
             byteCount,
-            modified,
-            requestURL.absoluteString
+            modified
         )
     }
 }

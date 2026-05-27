@@ -523,7 +523,7 @@ struct HubConfigView: View {
                         Image(systemName: "folder")
                             .foregroundStyle(.secondary)
                             .frame(width: 20)
-                        TextField("Vault path (e.g. /Users/you/repos/vault)", text: store.$vaultPath)
+                        TextField("Vault path (e.g. ~/repos/vault)", text: store.$vaultPath)
                             .textFieldStyle(.roundedBorder)
                             .font(.body.monospaced())
                             .onSubmit { Task { await store.fetchContacts() } }
