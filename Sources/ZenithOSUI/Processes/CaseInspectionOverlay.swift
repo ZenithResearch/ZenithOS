@@ -9,20 +9,20 @@ struct CaseInspectionOverlayHost<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        HStack(alignment: .top, spacing: 0) {
             content()
-            if let pinnedSelection {
-                CaseInspectionOverlay(
-                    selection: pinnedSelection,
-                    context: context,
-                    streamMode: streamMode,
-                    onSelect: onSelect,
-                    onClose: { self.pinnedSelection = nil }
-                )
-                .padding(24)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-                .zIndex(5)
-            }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            CaseInspectionOverlay(
+                selection: pinnedSelection ?? .overview,
+                context: context,
+                streamMode: streamMode,
+                onSelect: onSelect,
+                onClose: { self.pinnedSelection = .overview }
+            )
+            .frame(width: 440)
         }
         .animation(.easeInOut(duration: 0.16), value: pinnedSelection?.id)
     }
@@ -49,14 +49,8 @@ private struct CaseInspectionOverlay: View {
         }
         .padding(16)
         .frame(width: 430, alignment: .topLeading)
-        .frame(maxHeight: 620)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 12)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onExitCommand(perform: onClose)
         .sheet(item: $presentedFileReference) { reference in
             SlotMarkdownPreviewModal(reference: reference)
@@ -128,6 +122,7 @@ private struct CaseInspectionOverlay: View {
                 CaseInspectionField(label: "Objective", value: objective)
             }
             StreamModeMiniCard(mode: streamMode)
+            slotList(title: "Produced outputs", slots: CaseInspectionModel.producedOutputSlots(context: context))
         }
     }
 
@@ -148,6 +143,13 @@ private struct CaseInspectionOverlay: View {
             }
             CaseInspectionField(label: "Provenance", value: slot.producerStep == nil ? "Dispatcher/root-provided input" : "Also produced by \(slot.producerStep!.title)")
             CaseInspectionField(label: "Value", value: slot.displayValue, monospaced: true)
+            if let reference = slot.fileReference {
+                SlotFileReferenceRow(reference: reference) { selectedReference in
+                    if selectedReference.isMarkdownPreviewable {
+                        presentedFileReference = selectedReference
+                    }
+                }
+            }
         }
     }
 
@@ -283,13 +285,30 @@ private struct CaseInspectionOverlay: View {
                     Button {
                         onSelect(.slot(name: slot.name))
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(alignment: .top, spacing: 8) {
                             Circle()
                                 .fill(slot.isFilled ? Color.green : Color.secondary.opacity(0.35))
                                 .frame(width: 7, height: 7)
-                            Text(slot.name)
-                                .font(.system(.caption, design: .monospaced))
-                                .lineLimit(1)
+                                .padding(.top, 4)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(slot.name)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .lineLimit(1)
+                                    if let reference = slot.fileReference {
+                                        Image(systemName: reference.previewKind == .markdown ? "doc.richtext" : "doc")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(reference.resolutionState == .missing ? .orange : .accentColor)
+                                    }
+                                }
+                                if slot.isFilled {
+                                    Text(slot.displayValue.replacingOccurrences(of: "\n", with: " "))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .truncationMode(.middle)
+                                }
+                            }
                             Spacer(minLength: 0)
                             Text(slot.isFilled ? "filled" : "pending")
                                 .font(.caption2)
@@ -300,6 +319,7 @@ private struct CaseInspectionOverlay: View {
                     .padding(8)
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .help(slotHelpText(slot))
                 }
             }
         }
@@ -321,6 +341,24 @@ private struct CaseInspectionOverlay: View {
                 }
             }
         }
+    }
+
+    private func slotHelpText(_ slot: CaseSlotInspection) -> String {
+        var lines = ["\(slot.name): \(slot.displayValue)"]
+        if let producer = slot.producerStep {
+            lines.append("Produced by Step \(producer.number): \(producer.title)")
+        }
+        if let reference = slot.fileReference {
+            lines.append("File reference: \(reference.displayPath)")
+            if reference.resolutionState == .missing {
+                lines.append("Missing locally; click to inspect mount/fallback details.")
+            } else if reference.isMarkdownPreviewable {
+                lines.append("Click, then Preview to render this markdown output.")
+            }
+        } else {
+            lines.append("Click to inspect the full slot value and provenance.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func linkedStepField(label: String, step: SpecStep) -> some View {
@@ -372,6 +410,8 @@ private struct CaseInspectionCaption: View {
 private struct SlotFileReferenceRow: View {
     let reference: SlotFileReference
     let onPreview: (SlotFileReference) -> Void
+    @State private var materializationMessage: String?
+    @State private var isMaterializing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -395,6 +435,14 @@ private struct SlotFileReferenceRow: View {
                         Text("Available through Hub artifact: \(reference.sourceLabel ?? reference.artifactID ?? "registered artifact")")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                        if let materializationURL = reference.materializationURL {
+                            Text("Will materialize into: \(materializationURL.path)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
                     } else if reference.resolutionState == .mountedFile, let sourceLabel = reference.sourceLabel {
                         Text("Resolved through configured Hub mount: \(sourceLabel)")
                             .font(.caption2)
@@ -406,9 +454,22 @@ private struct SlotFileReferenceRow: View {
 
             HStack(spacing: 8) {
                 if reference.isMarkdownPreviewable {
-                    Button("Preview") { onPreview(reference) }
+                    Button(reference.materializationURL == nil ? "Preview" : "Materialize & Preview") { onPreview(reference) }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                } else if reference.resolutionState == .hubArtifact, reference.materializationURL != nil {
+                    Button(isMaterializing ? "Materializing…" : "Materialize") {
+                        Task { await materializeGenericArtifact() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isMaterializing)
+                }
+                if let materializationMessage {
+                    Text(materializationMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 if let url = reference.url {
                     Button("Open") { NSWorkspace.shared.open(url) }
@@ -468,6 +529,24 @@ private struct SlotFileReferenceRow: View {
         case .hubArtifact: return .blue
         case .mountedFile: return .accentColor
         case .localFile: return reference.previewKind == .markdown ? .accentColor : .secondary
+        }
+    }
+
+    @MainActor
+    private func materializeGenericArtifact() async {
+        isMaterializing = true
+        materializationMessage = nil
+        defer { isMaterializing = false }
+        do {
+            let result = try await HubArtifactMirror.materializeIfPossible(reference: reference)
+            if let localURL = result.localURL {
+                materializationMessage = "Materialized to \(localURL.path)"
+                NSWorkspace.shared.activateFileViewerSelecting([localURL])
+            } else {
+                materializationMessage = "Fetched from Hub, but no local mirror path is configured."
+            }
+        } catch {
+            materializationMessage = "Materialization failed: \(error.localizedDescription)"
         }
     }
 }
@@ -553,26 +632,15 @@ private struct SlotMarkdownPreviewModal: View {
     private func loadHubArtifactIfNeeded() async {
         guard reference.resolutionState == .hubArtifact else { return }
         do {
-            let data: Data
-            if reference.usesAdminArtifactAccess, let path = reference.artifactContentPath {
-                let client = ReviewAccessHubClient(baseURL: adminBaseURL())
-                data = try await client.adminData(path: path)
-            } else if let url = reference.artifactContentURL {
-                let (fetched, response) = try await URLSession.shared.data(from: url)
-                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    throw ReviewAccessHubClientError.http(http.statusCode, String(data: fetched, encoding: .utf8) ?? "")
-                }
-                data = fetched
-            } else {
-                return
-            }
-            let markdown = String(data: data, encoding: .utf8) ?? "Could not decode Hub artifact as UTF-8 Markdown."
-            let title = URL(fileURLWithPath: reference.displayPath).deletingPathExtension().lastPathComponent
+            let result = try await HubArtifactMirror.materializeIfPossible(reference: reference)
+            let markdown = String(data: result.data, encoding: .utf8) ?? "Could not decode Hub artifact as UTF-8 Markdown."
+            let sourceURL = result.localURL ?? reference.artifactContentURL
+            let title = (result.localURL ?? URL(fileURLWithPath: reference.displayPath)).deletingPathExtension().lastPathComponent
             session.setDocument(
                 MarkdownDocumentSource(
                     title: title,
                     markdown: markdown,
-                    sourceURL: reference.artifactContentURL,
+                    sourceURL: sourceURL,
                     context: .process
                 ),
                 resetHistory: true
@@ -581,7 +649,7 @@ private struct SlotMarkdownPreviewModal: View {
             session.setDocument(
                 MarkdownDocumentSource(
                     title: "Hub artifact unavailable",
-                    markdown: "Could not load Hub artifact.\n\n`\(error.localizedDescription)`",
+                    markdown: "Could not load or materialize Hub artifact.\n\n`\(error.localizedDescription)`",
                     sourceURL: reference.artifactContentURL,
                     context: .process
                 ),

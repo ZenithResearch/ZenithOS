@@ -11,6 +11,8 @@ struct ProcessDetailView: View {
     @State private var rawProcessMarkdown: String? = nil
     @State private var rawProcessSourceURL: URL? = nil
     @State private var expandedDocument: MarkdownDocumentSource? = nil
+    @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) private var hubPathRoot: String = ""
 
     private let gatewayBase = ProcessInfo.processInfo.environment["GATEWAY_HTTP_URL"]
         ?? "http://localhost:8080"
@@ -121,6 +123,12 @@ struct ProcessDetailView: View {
         let localURL = path.flatMap(localProcessURL(for:))
         rawProcessSourceURL = localURL
 
+        if let path {
+            if await loadRawProcessSourceFromHubFS(path: path) {
+                return
+            }
+        }
+
         if let source = processCase.processSource, !source.isEmpty {
             rawProcessMarkdown = source
             return
@@ -145,6 +153,32 @@ struct ProcessDetailView: View {
 
         if let localURL {
             rawProcessMarkdown = try? String(contentsOf: localURL, encoding: .utf8)
+        }
+    }
+
+    private func loadRawProcessSourceFromHubFS(path: String) async -> Bool {
+        let mounts = HubRemoteAccess.mappings(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
+        guard let reference = HubArtifactMirror.mirrorFileReference(
+            runtimePath: path,
+            baseURL: store.artifactContentBaseURL,
+            usesAdminArtifactAccess: store.usesAdminArtifactAccess,
+            mounts: mounts,
+            previewKind: .markdown,
+            sourceLabel: "process document HubFS path"
+        ) else { return false }
+
+        rawProcessSourceURL = reference.artifactContentURL
+        do {
+            let result = try await HubArtifactMirror.materializeIfPossible(reference: reference)
+            guard let markdown = String(data: result.data, encoding: .utf8), !markdown.isEmpty else {
+                return false
+            }
+            rawProcessMarkdown = markdown
+            rawProcessSourceURL = result.localURL ?? reference.artifactContentURL
+            return true
+        } catch {
+            specError = error.localizedDescription
+            return false
         }
     }
 
@@ -285,8 +319,9 @@ private struct ProcessSpecView: View {
     let onExpandDocument: (MarkdownDocumentSource) -> Void
     @State private var hoveredStepIndex: Int? = nil
     @State private var hoveredInspectionTarget: CaseInspectionSelection? = nil
-    @State private var pinnedInspectionTarget: CaseInspectionSelection? = nil
+    @State private var pinnedInspectionTarget: CaseInspectionSelection? = .overview
     @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) private var hubPathRoot: String = ""
 
     private var displaySteps: [SpecStep] {
         normalizedDisplaySteps(spec.steps)
@@ -305,7 +340,7 @@ private struct ProcessSpecView: View {
             consumerMap: consumerMap(from: displaySteps),
             rawProcessMarkdown: rawProcessMarkdown,
             rawProcessSourceURL: rawProcessSourceURL,
-            artifactMounts: HubArtifactMount.load(from: hubArtifactMountsJSON),
+            artifactMounts: HubRemoteAccess.mappings(from: hubArtifactMountsJSON, rootPath: hubPathRoot),
             artifactContentBaseURL: artifactContentBaseURL,
             usesAdminArtifactAccess: usesAdminArtifactAccess
         )
@@ -319,19 +354,26 @@ private struct ProcessSpecView: View {
             onSelect: { pinnedInspectionTarget = $0 }
         ) {
             HStack(alignment: .top, spacing: 0) {
-                // Left panel
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    leftPanel
+                CaseInspectionSidebar(
+                    title: spec.title,
+                    subtitle: spec.description,
+                    context: inspectionContext,
+                    streamMode: streamMode,
+                    selection: $pinnedInspectionTarget,
+                    onExpandDocument: onExpandDocument,
+                    processDocument: processDocument(title: spec.title)
+                ) {
+                    ProcessStatusRow(status: processCase.status)
+                    if let detail {
+                        DispatchSummaryCard(detail: detail)
+                        SlotStatusSummaryCard(slots: detail.slots)
+                    }
+                    CaseRetryActions(status: processCase.status, caseID: processCase.id, gatewayBase: gatewayBase)
                 }
-                .padding(20)
-            }
-            .frame(width: processSidebarWidth)
-            .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
 
-            // Right panel — DAG
+            // Center panel — DAG
             DagGraphView(
                 steps: displaySteps,
                 variables: spec.variables,
@@ -427,8 +469,9 @@ private struct ProcessContractView: View {
     let onExpandDocument: (MarkdownDocumentSource) -> Void
     @State private var hoveredStepIndex: Int? = nil
     @State private var hoveredInspectionTarget: CaseInspectionSelection? = nil
-    @State private var pinnedInspectionTarget: CaseInspectionSelection? = nil
+    @State private var pinnedInspectionTarget: CaseInspectionSelection? = .overview
     @AppStorage(HubArtifactMount.userDefaultsKey) private var hubArtifactMountsJSON: String = "[]"
+    @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) private var hubPathRoot: String = ""
 
     private var displaySteps: [SpecStep] {
         normalizedDisplaySteps(contract.steps)
@@ -445,7 +488,7 @@ private struct ProcessContractView: View {
             consumerMap: contract.consumerMap,
             rawProcessMarkdown: rawProcessMarkdown,
             rawProcessSourceURL: rawProcessSourceURL,
-            artifactMounts: HubArtifactMount.load(from: hubArtifactMountsJSON),
+            artifactMounts: HubRemoteAccess.mappings(from: hubArtifactMountsJSON, rootPath: hubPathRoot),
             artifactContentBaseURL: artifactContentBaseURL,
             usesAdminArtifactAccess: usesAdminArtifactAccess
         )
@@ -467,14 +510,22 @@ private struct ProcessContractView: View {
             onSelect: { pinnedInspectionTarget = $0 }
         ) {
             HStack(alignment: .top, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    leftPanel
+            CaseInspectionSidebar(
+                title: contract.title,
+                subtitle: contract.description,
+                context: inspectionContext,
+                streamMode: streamMode,
+                selection: $pinnedInspectionTarget,
+                onExpandDocument: onExpandDocument,
+                processDocument: processDocument(title: contract.title)
+            ) {
+                ProcessStatusRow(status: processCase.status)
+                if let detail {
+                    DispatchSummaryCard(detail: detail)
+                    SlotStatusSummaryCard(slots: detail.slots)
                 }
-                .padding(20)
+                CaseRetryActions(status: processCase.status, caseID: processCase.id, gatewayBase: gatewayBase)
             }
-            .frame(width: processSidebarWidth)
-            .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
 
@@ -1306,20 +1357,19 @@ private struct DagGraphView: View {
                             )
 
                             ForEach(renderedEdges, id: \._inspectionID) { edge in
-                                if let geometry = layout.geometry(for: edge),
-                                   let fromStep = steps.indices.contains(edge.from) ? steps[edge.from] : nil,
-                                   let toStep = steps.indices.contains(edge.to) ? steps[edge.to] : nil {
-                                    let slotNames = CaseInspectionModel.slotNamesForEdge(from: fromStep, to: toStep, context: inspectionContext)
+                                if let geometry = layout.geometry(for: edge) {
+                                    let slotNames = edgeSlotNames(edge)
+                                    let selection = CaseInspectionSelection.edge(from: edge.from, to: edge.to, slotNames: slotNames)
                                     DagEdgeSelectionOverlay(
                                         edge: edge,
                                         slotNames: slotNames,
                                         geometry: geometry,
-                                        isSelected: pinnedInspectionTarget == .edge(from: edge.from, to: edge.to, slotNames: slotNames),
+                                        isSelected: pinnedInspectionTarget == selection,
                                         onHoverChanged: { hovering in
-                                            hoveredInspectionTarget = hovering ? .edge(from: edge.from, to: edge.to, slotNames: slotNames) : nil
+                                            hoveredInspectionTarget = hovering ? selection : nil
                                         },
                                         onSelect: {
-                                            pinnedInspectionTarget = .edge(from: edge.from, to: edge.to, slotNames: slotNames)
+                                            pinnedInspectionTarget = selection
                                         }
                                     )
                                 }
@@ -1406,6 +1456,17 @@ private struct DagGraphView: View {
             return
         }
         self.selectedExecutionStepID = runningSteps.first?.id
+    }
+
+    private func edgeSlotNames(_ edge: DagEdge) -> [String] {
+        guard steps.indices.contains(edge.from), steps.indices.contains(edge.to) else {
+            return edge.label.isEmpty ? [] : [edge.label]
+        }
+        return CaseInspectionModel.slotNamesForEdge(
+            from: steps[edge.from],
+            to: steps[edge.to],
+            context: inspectionContext
+        )
     }
 }
 
@@ -1700,8 +1761,15 @@ private struct DagEdgeSelectionOverlay: View {
     var body: some View {
         Button(action: onSelect) {
             Circle()
-                .fill(isSelected ? Color.accentColor.opacity(0.85) : Color.clear)
-                .frame(width: isSelected ? 8 : 28, height: isSelected ? 8 : 28)
+                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.58))
+                .frame(width: isSelected ? 9 : 7, height: isSelected ? 9 : 7)
+                .padding(6)
+                .background(.regularMaterial)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+                .clipShape(Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
