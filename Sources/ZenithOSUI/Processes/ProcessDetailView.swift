@@ -135,25 +135,52 @@ struct ProcessDetailView: View {
         }
 
         if let path {
-            guard let url = URL(string: "\(gatewayBase)/v1/processes/\(path)") else {
-                if let localURL {
-                    rawProcessMarkdown = try? String(contentsOf: localURL, encoding: .utf8)
-                }
-                return
-            }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let json = try? JSONDecoder().decode([String: String].self, from: data),
-                   let content = json["content"] {
-                    rawProcessMarkdown = content
+            for baseURL in processSpecEndpointBaseURLs() {
+                if await loadRawProcessSourceFromProcessEndpoint(path: path, baseURL: baseURL) {
                     return
                 }
-            } catch {}
+            }
         }
 
         if let localURL {
             rawProcessMarkdown = try? String(contentsOf: localURL, encoding: .utf8)
         }
+    }
+
+    private func processSpecEndpointBaseURLs() -> [URL] {
+        var urls: [URL] = []
+        if store.usesAdminArtifactAccess, let hubBaseURL = store.artifactContentBaseURL {
+            urls.append(hubBaseURL)
+        }
+        if let gatewayURL = URL(string: gatewayBase) {
+            urls.append(gatewayURL)
+        }
+        return urls.reduce(into: []) { unique, url in
+            if !unique.contains(url) {
+                unique.append(url)
+            }
+        }
+    }
+
+    private func loadRawProcessSourceFromProcessEndpoint(path: String, baseURL: URL) async -> Bool {
+        guard !path.contains("/") else { return false }
+        let url = baseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("processes")
+            .appendingPathComponent(path)
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                return false
+            }
+            if let json = try? JSONDecoder().decode([String: String].self, from: data),
+               let content = json["content"], !content.isEmpty {
+                rawProcessMarkdown = content
+                rawProcessSourceURL = url
+                return true
+            }
+        } catch {}
+        return false
     }
 
     private func loadRawProcessSourceFromHubFS(path: String) async -> Bool {
