@@ -158,14 +158,15 @@ struct ProcessDetailView: View {
 
     private func loadRawProcessSourceFromHubFS(path: String) async -> Bool {
         let mounts = HubRemoteAccess.mappings(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
-        guard let reference = HubArtifactMirror.mirrorFileReference(
-            runtimePath: path,
-            baseURL: store.artifactContentBaseURL,
-            usesAdminArtifactAccess: store.usesAdminArtifactAccess,
-            mounts: mounts,
-            previewKind: .markdown,
-            sourceLabel: "process document HubFS path"
-        ) else { return false }
+        guard let runtimePath = processDocumentRuntimePath(from: path),
+              let reference = HubArtifactMirror.mirrorFileReference(
+                  runtimePath: runtimePath,
+                  baseURL: store.artifactContentBaseURL,
+                  usesAdminArtifactAccess: store.usesAdminArtifactAccess,
+                  mounts: mounts,
+                  previewKind: .markdown,
+                  sourceLabel: "process document HubFS path"
+              ) else { return false }
 
         rawProcessSourceURL = reference.artifactContentURL
         do {
@@ -180,6 +181,57 @@ struct ProcessDetailView: View {
             specError = error.localizedDescription
             return false
         }
+    }
+
+    private func processDocumentRuntimePath(from rawPath: String) -> String? {
+        let extracted = structurallyExtractProcessPath(from: rawPath) ?? rawPath
+        var trimmed = extracted
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        guard !trimmed.isEmpty else { return nil }
+
+        let withoutFragment = trimmed.split(separator: "#", maxSplits: 1).first.map(String.init) ?? trimmed
+        trimmed = withoutFragment.removingPercentEncoding ?? withoutFragment
+
+        if trimmed.hasPrefix("file://"), let url = URL(string: trimmed) {
+            trimmed = url.path
+        } else if trimmed.hasPrefix("file:") {
+            trimmed = String(trimmed.dropFirst(5))
+        } else if trimmed.hasPrefix("dir:") {
+            trimmed = String(trimmed.dropFirst(4))
+        }
+
+        return HubFSPath.normalize(trimmed)
+    }
+
+    private func structurallyExtractProcessPath(from raw: String) -> String? {
+        guard let data = raw.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            return nil
+        }
+        return extractProcessPath(from: value)
+    }
+
+    private func extractProcessPath(from value: Any) -> String? {
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let object = value as? [String: Any] {
+            for key in ["path", "process_path", "processPath", "file_path", "filepath", "url", "uri", "href", "source", "source_path"] {
+                if let extracted = object[key].flatMap({ extractProcessPath(from: $0) }) {
+                    return extracted
+                }
+            }
+        }
+        if let array = value as? [Any] {
+            for item in array {
+                if let extracted = extractProcessPath(from: item) {
+                    return extracted
+                }
+            }
+        }
+        return nil
     }
 
     private var resolvedProcessPath: String? {
