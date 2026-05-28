@@ -15,4 +15,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Hardened public-repo ignore rules for local secrets, virtualenvs, pycache, logs, sessions, and database artifacts — keeps generated/runtime state out of future commits.
 
 ### Fixed
+- Fixed Hub runtime config decoding for manifest `environment` maps and top-level secret status rows — makes the operator panel show live env/secret coverage instead of `env 0 · secrets 0` after Hub deploy.
 - Marked Markdown WebKit callbacks as main-actor isolated — keeps the initial GitHub macOS CI build compatible with stricter Swift actor checking.

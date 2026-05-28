@@ -140,6 +140,7 @@ struct HubRuntimeConfigResponse: Decodable {
     var ok: Bool?
     var hub: String?
     var services: [HubRuntimeServiceConfig]
+    var secrets: [HubRuntimeSecretStatus]
     var providerSecretWrites: ProviderSecretWriteCapabilities?
     var secretsPrinted: Bool
 
@@ -147,14 +148,16 @@ struct HubRuntimeConfigResponse: Decodable {
         case ok
         case hub
         case services
+        case secrets
         case providerSecretWrites = "provider_secret_writes"
         case secretsPrinted = "secrets_printed"
     }
 
-    init(ok: Bool? = nil, hub: String? = nil, services: [HubRuntimeServiceConfig] = [], providerSecretWrites: ProviderSecretWriteCapabilities? = nil, secretsPrinted: Bool = false) {
+    init(ok: Bool? = nil, hub: String? = nil, services: [HubRuntimeServiceConfig] = [], secrets: [HubRuntimeSecretStatus] = [], providerSecretWrites: ProviderSecretWriteCapabilities? = nil, secretsPrinted: Bool = false) {
         self.ok = ok
         self.hub = hub
         self.services = services
+        self.secrets = secrets
         self.providerSecretWrites = providerSecretWrites
         self.secretsPrinted = secretsPrinted
     }
@@ -164,6 +167,7 @@ struct HubRuntimeConfigResponse: Decodable {
         ok = try container.decodeIfPresent(Bool.self, forKey: .ok)
         hub = try container.decodeIfPresent(String.self, forKey: .hub)
         services = try HubRuntimeConfigResponse.decodeServices(from: container, forKey: .services)
+        secrets = try HubRuntimeConfigResponse.decodeSecrets(from: container, forKey: .secrets)
         providerSecretWrites = try container.decodeIfPresent(ProviderSecretWriteCapabilities.self, forKey: .providerSecretWrites)
         secretsPrinted = try container.decodeIfPresent(Bool.self, forKey: .secretsPrinted) ?? false
     }
@@ -178,6 +182,20 @@ struct HubRuntimeConfigResponse: Decodable {
                 if next.service.isEmpty { next.service = service }
                 return next
             }.sorted { $0.service < $1.service }
+        }
+        return []
+    }
+
+    private static func decodeSecrets(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> [HubRuntimeSecretStatus] {
+        if let array = try? container.decode([HubRuntimeSecretStatus].self, forKey: key) {
+            return array
+        }
+        if let dictionary = try? container.decode([String: HubRuntimeSecretStatus].self, forKey: key) {
+            return dictionary.map { secretKey, status in
+                var next = status
+                if next.key.isEmpty { next.key = secretKey }
+                return next
+            }.sorted { $0.key < $1.key }
         }
         return []
     }
@@ -256,6 +274,7 @@ struct HubRuntimeSecretStatus: Decodable, Identifiable {
     var id: String { key }
     var key: String
     var source: String?
+    var service: String?
     var configured: Bool?
     var handlePreview: String?
     var lastCheckedAt: Date?
@@ -263,9 +282,29 @@ struct HubRuntimeSecretStatus: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case key
         case source
+        case service
         case configured
         case handlePreview = "handle_preview"
         case lastCheckedAt = "last_checked_at"
+    }
+
+    init(key: String, source: String? = nil, service: String? = nil, configured: Bool? = nil, handlePreview: String? = nil, lastCheckedAt: Date? = nil) {
+        self.key = key
+        self.source = source
+        self.service = service
+        self.configured = configured
+        self.handlePreview = handlePreview
+        self.lastCheckedAt = lastCheckedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decodeIfPresent(String.self, forKey: .key) ?? ""
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        service = try container.decodeIfPresent(String.self, forKey: .service)
+        configured = try container.decodeIfPresent(Bool.self, forKey: .configured)
+        handlePreview = try container.decodeIfPresent(String.self, forKey: .handlePreview)
+        lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt)
     }
 }
 
@@ -329,6 +368,7 @@ struct HubImageEnvService: Decodable, Identifiable {
         case service
         case image
         case env
+        case environment
         case secrets
     }
 
@@ -344,11 +384,15 @@ struct HubImageEnvService: Decodable, Identifiable {
         service = try container.decodeIfPresent(String.self, forKey: .service) ?? ""
         image = try container.decodeIfPresent(String.self, forKey: .image)
         env = Self.decodeStringList(from: container, forKey: .env)
+        if env.isEmpty {
+            env = Self.decodeStringList(from: container, forKey: .environment)
+        }
         secrets = Self.decodeStringList(from: container, forKey: .secrets)
     }
 
     private static func decodeStringList(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> [String] {
         if let array = try? container.decode([String].self, forKey: key) { return array.sorted() }
+        if let secretDict = try? container.decode([String: HubRuntimeSecretStatus].self, forKey: key) { return secretDict.keys.sorted() }
         if let dict = try? container.decode([String: String].self, forKey: key) { return dict.keys.sorted() }
         if let boolDict = try? container.decode([String: Bool].self, forKey: key) { return boolDict.keys.sorted() }
         return []

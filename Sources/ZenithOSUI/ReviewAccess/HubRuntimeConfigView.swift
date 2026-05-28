@@ -124,9 +124,11 @@ struct HubRuntimeConfigView: View {
             Text("Runtime secrets")
                 .font(.caption.weight(.semibold))
             if let runtimeConfig = store.runtimeConfig {
-                let secrets = runtimeConfig.services.flatMap { service in
+                let serviceSecrets = runtimeConfig.services.flatMap { service in
                     service.secrets.map { (service.service, $0) }
                 }
+                let topLevelSecrets = runtimeConfig.secrets.map { ($0.service ?? "runtime", $0) }
+                let secrets = serviceSecrets + topLevelSecrets
                 if secrets.isEmpty {
                     Text("No secret status rows returned. This Hub may only expose manifest-level status.")
                         .font(.caption2)
