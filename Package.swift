@@ -29,5 +29,10 @@ let package = Package(
                 .copy("MarkdownResources"),
             ]
         ),
+        .testTarget(
+            name: "ZenithOSUITests",
+            dependencies: ["ZenithOSUI"],
+            path: "Tests/ZenithOSUITests"
+        ),
     ]
 )

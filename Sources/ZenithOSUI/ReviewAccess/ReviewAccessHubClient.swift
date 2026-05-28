@@ -135,6 +135,418 @@ struct ReviewAccessAdminTokenUpdateResponse: Decodable {
     }
 }
 
+
+struct HubRuntimeConfigResponse: Decodable {
+    var ok: Bool?
+    var hub: String?
+    var services: [HubRuntimeServiceConfig]
+    var providerSecretWrites: ProviderSecretWriteCapabilities?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case hub
+        case services
+        case providerSecretWrites = "provider_secret_writes"
+        case secretsPrinted = "secrets_printed"
+    }
+
+    init(ok: Bool? = nil, hub: String? = nil, services: [HubRuntimeServiceConfig] = [], providerSecretWrites: ProviderSecretWriteCapabilities? = nil, secretsPrinted: Bool = false) {
+        self.ok = ok
+        self.hub = hub
+        self.services = services
+        self.providerSecretWrites = providerSecretWrites
+        self.secretsPrinted = secretsPrinted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decodeIfPresent(Bool.self, forKey: .ok)
+        hub = try container.decodeIfPresent(String.self, forKey: .hub)
+        services = try HubRuntimeConfigResponse.decodeServices(from: container, forKey: .services)
+        providerSecretWrites = try container.decodeIfPresent(ProviderSecretWriteCapabilities.self, forKey: .providerSecretWrites)
+        secretsPrinted = try container.decodeIfPresent(Bool.self, forKey: .secretsPrinted) ?? false
+    }
+
+    private static func decodeServices(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> [HubRuntimeServiceConfig] {
+        if let array = try? container.decode([HubRuntimeServiceConfig].self, forKey: key) {
+            return array
+        }
+        if let dictionary = try? container.decode([String: HubRuntimeServiceConfig].self, forKey: key) {
+            return dictionary.map { service, config in
+                var next = config
+                if next.service.isEmpty { next.service = service }
+                return next
+            }.sorted { $0.service < $1.service }
+        }
+        return []
+    }
+}
+
+struct HubRuntimeServiceConfig: Decodable, Identifiable {
+    var id: String { service }
+    var service: String
+    var env: [HubRuntimeEnvVar]
+    var secrets: [HubRuntimeSecretStatus]
+
+    enum CodingKeys: String, CodingKey {
+        case service
+        case env
+        case secrets
+    }
+
+    init(service: String = "", env: [HubRuntimeEnvVar] = [], secrets: [HubRuntimeSecretStatus] = []) {
+        self.service = service
+        self.env = env
+        self.secrets = secrets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        service = try container.decodeIfPresent(String.self, forKey: .service) ?? ""
+        env = try HubRuntimeServiceConfig.decodeEnv(from: container)
+        secrets = try HubRuntimeServiceConfig.decodeSecrets(from: container)
+    }
+
+    private static func decodeEnv(from container: KeyedDecodingContainer<CodingKeys>) throws -> [HubRuntimeEnvVar] {
+        if let array = try? container.decode([HubRuntimeEnvVar].self, forKey: .env) { return array }
+        if let dict = try? container.decode([String: HubRuntimeEnvVar].self, forKey: .env) {
+            return dict.map { key, value in
+                var next = value
+                if next.key.isEmpty { next.key = key }
+                return next
+            }.sorted { $0.key < $1.key }
+        }
+        if let stringDict = try? container.decode([String: String].self, forKey: .env) {
+            return stringDict.map { HubRuntimeEnvVar(key: $0.key, valuePreview: $0.value, source: nil) }.sorted { $0.key < $1.key }
+        }
+        return []
+    }
+
+    private static func decodeSecrets(from container: KeyedDecodingContainer<CodingKeys>) throws -> [HubRuntimeSecretStatus] {
+        if let array = try? container.decode([HubRuntimeSecretStatus].self, forKey: .secrets) { return array }
+        if let dict = try? container.decode([String: HubRuntimeSecretStatus].self, forKey: .secrets) {
+            return dict.map { key, value in
+                var next = value
+                if next.key.isEmpty { next.key = key }
+                return next
+            }.sorted { $0.key < $1.key }
+        }
+        if let boolDict = try? container.decode([String: Bool].self, forKey: .secrets) {
+            return boolDict.map { HubRuntimeSecretStatus(key: $0.key, source: nil, configured: $0.value, handlePreview: nil, lastCheckedAt: nil) }.sorted { $0.key < $1.key }
+        }
+        return []
+    }
+}
+
+struct HubRuntimeEnvVar: Decodable, Identifiable {
+    var id: String { key }
+    var key: String
+    var valuePreview: String?
+    var source: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case valuePreview = "value_preview"
+        case source
+    }
+}
+
+struct HubRuntimeSecretStatus: Decodable, Identifiable {
+    var id: String { key }
+    var key: String
+    var source: String?
+    var configured: Bool?
+    var handlePreview: String?
+    var lastCheckedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case source
+        case configured
+        case handlePreview = "handle_preview"
+        case lastCheckedAt = "last_checked_at"
+    }
+}
+
+struct ProviderSecretWriteCapabilities: Decodable {
+    var supported: Bool
+    var backend: String?
+    var targets: [ProviderSecretWriteTarget]
+}
+
+struct ProviderSecretWriteTarget: Decodable, Identifiable {
+    var id: String { target }
+    var target: String
+    var label: String?
+    var endpoint: String?
+    var secretKey: String?
+    var backend: String?
+
+    enum CodingKeys: String, CodingKey {
+        case target
+        case label
+        case endpoint
+        case secretKey = "secret_key"
+        case backend
+    }
+}
+
+struct HubImageEnvManifestResponse: Decodable {
+    var services: [HubImageEnvService]
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case services
+        case secretsPrinted = "secrets_printed"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let array = try? container.decode([HubImageEnvService].self, forKey: .services) {
+            services = array
+        } else if let dictionary = try? container.decode([String: HubImageEnvService].self, forKey: .services) {
+            services = dictionary.map { service, config in
+                var next = config
+                if next.service.isEmpty { next.service = service }
+                return next
+            }.sorted { $0.service < $1.service }
+        } else {
+            services = []
+        }
+        secretsPrinted = try container.decodeIfPresent(Bool.self, forKey: .secretsPrinted) ?? false
+    }
+}
+
+struct HubImageEnvService: Decodable, Identifiable {
+    var id: String { service }
+    var service: String
+    var image: String?
+    var env: [String]
+    var secrets: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case service
+        case image
+        case env
+        case secrets
+    }
+
+    init(service: String = "", image: String? = nil, env: [String] = [], secrets: [String] = []) {
+        self.service = service
+        self.image = image
+        self.env = env
+        self.secrets = secrets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        service = try container.decodeIfPresent(String.self, forKey: .service) ?? ""
+        image = try container.decodeIfPresent(String.self, forKey: .image)
+        env = Self.decodeStringList(from: container, forKey: .env)
+        secrets = Self.decodeStringList(from: container, forKey: .secrets)
+    }
+
+    private static func decodeStringList(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> [String] {
+        if let array = try? container.decode([String].self, forKey: key) { return array.sorted() }
+        if let dict = try? container.decode([String: String].self, forKey: key) { return dict.keys.sorted() }
+        if let boolDict = try? container.decode([String: Bool].self, forKey: key) { return boolDict.keys.sorted() }
+        return []
+    }
+}
+
+struct HubConfigValidationResponse: Decodable {
+    var ok: Bool?
+    var status: String?
+    var detail: String?
+    var provider: String?
+    var model: String?
+    var configured: Bool?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case status
+        case detail
+        case provider
+        case model
+        case configured
+        case secretsPrinted = "secrets_printed"
+    }
+}
+
+struct ProviderSecretRotationRequest: Encodable {
+    var value: String
+}
+
+struct ProviderSecretRotationResponse: Decodable {
+    var target: String
+    var configured: Bool
+    var backend: String?
+    var handlePreview: String?
+    var rotatedAt: Date?
+    var auditID: String?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case target
+        case configured
+        case backend
+        case handlePreview = "handle_preview"
+        case rotatedAt = "rotated_at"
+        case auditID = "audit_id"
+        case secretsPrinted = "secrets_printed"
+    }
+}
+
+struct ModelProfileQuery: Hashable {
+    var agent: String
+    var profile: String
+    var deploymentProfile: String
+
+    var queryItems: [URLQueryItem] {
+        [
+            URLQueryItem(name: "agent", value: agent),
+            URLQueryItem(name: "profile", value: profile),
+            URLQueryItem(name: "deployment_profile", value: deploymentProfile)
+        ]
+    }
+}
+
+struct ModelProfileEffectiveResponse: Decodable {
+    var agent: String?
+    var profile: String?
+    var deploymentProfile: String?
+    var provider: String?
+    var model: String?
+    var endpoint: ModelProfileEndpoint?
+    var runtime: ModelProfileRuntime?
+    var fallbackProfile: String?
+    var secret: ModelProfileSecretStatus?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case agent
+        case profile
+        case deploymentProfile = "deployment_profile"
+        case provider
+        case model
+        case endpoint
+        case runtime
+        case fallbackProfile = "fallback_profile"
+        case secret
+        case secretsPrinted = "secrets_printed"
+    }
+}
+
+struct ModelProfileEndpoint: Decodable {
+    var handle: String?
+    var baseURL: String?
+    var visibility: String?
+
+    enum CodingKeys: String, CodingKey {
+        case handle
+        case baseURL = "base_url"
+        case visibility
+    }
+}
+
+struct ModelProfileRuntime: Codable {
+    var timeout: Double?
+    var temperature: Double?
+    var maxTokens: Int?
+    var enabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case timeout
+        case temperature
+        case maxTokens = "max_tokens"
+        case enabled
+    }
+}
+
+struct ModelProfileSecretStatus: Decodable {
+    var configured: Bool?
+    var handlePreview: String?
+    var source: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured
+        case handlePreview = "handle_preview"
+        case source
+    }
+}
+
+struct ModelProfileConnectivityResponse: Decodable {
+    var ok: Bool?
+    var statusCode: Int?
+    var latencyMS: Double?
+    var detail: String?
+    var provider: String?
+    var endpoint: String?
+    var model: String?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case statusCode = "status_code"
+        case latencyMS = "latency_ms"
+        case detail
+        case provider
+        case endpoint
+        case model
+        case secretsPrinted = "secrets_printed"
+    }
+}
+
+struct ModelProfileBindingUpdateRequest: Encodable {
+    var provider: String?
+    var model: String?
+    var endpointHandle: String?
+    var fallbackProfile: String?
+    var runtime: ModelProfileRuntime?
+    var enabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case endpointHandle = "endpoint_handle"
+        case fallbackProfile = "fallback_profile"
+        case runtime
+        case enabled
+    }
+}
+
+struct ModelProfileBindingUpdateResponse: Decodable {
+    var ok: Bool?
+    var auditID: String?
+    var effective: ModelProfileEffectiveResponse?
+    var connectivity: ModelProfileConnectivityResponse?
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case auditID = "audit_id"
+        case effective
+        case connectivity
+        case secretsPrinted = "secrets_printed"
+    }
+}
+
+struct HubProviderSecretInputValidator {
+    enum ValidationError: Error, Equatable {
+        case empty
+        case multiline
+    }
+
+    static func normalized(_ rawValue: String) throws -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw ValidationError.empty }
+        guard !trimmed.contains("\n") && !trimmed.contains("\r") else { throw ValidationError.multiline }
+        return trimmed
+    }
+}
+
 enum ReviewAccessHubClientError: LocalizedError {
     case missingAdminToken
     case badURL
@@ -195,6 +607,15 @@ enum ReviewAccessHubClientError: LocalizedError {
         }
         if path.hasPrefix("v1/admin/review-auth/") {
             return "\(prefix) This Hub does not expose the Review Access admin endpoint yet; deploy/restart the Hub with the latest gateway before verifying or setting the token from ZenithOS."
+        }
+        if path.hasPrefix("v1/admin/config") {
+            return "\(prefix) This Hub does not expose runtime config routes yet; deploy/restart Gateway with the runtime-config endpoints before using live env status from ZenithOS."
+        }
+        if path.hasPrefix("v1/admin/model-profiles") {
+            return "\(prefix) This Hub does not expose model profile routes yet; deploy/restart Gateway with the model-profile endpoints before editing agent runtime config from ZenithOS."
+        }
+        if path.hasPrefix("v1/admin/secrets/provider/") {
+            return "\(prefix) This Hub does not expose safe provider-secret writes yet; keep ZenithOS in status-only mode or rotate secrets through AWS Secrets Manager/deployment control plane."
         }
         return prefix
     }
@@ -285,6 +706,65 @@ final class ReviewAccessHubClient {
     }
 
     func adminData(path: String, queryItems: [URLQueryItem] = []) async throws -> Data {
+        try await adminRequest(path: path, method: "GET", queryItems: queryItems, body: Optional<Data>.none, operatorID: nil)
+    }
+
+    func runtimeConfigStatus() async throws -> HubRuntimeConfigResponse {
+        let data = try await adminData(path: "v1/admin/config")
+        let decoded = try JSONDecoder.reviewAccessHub.decode(HubRuntimeConfigResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func imageEnvManifest() async throws -> HubImageEnvManifestResponse {
+        let data = try await adminData(path: "v1/admin/config/image-env-manifest")
+        let decoded = try JSONDecoder.reviewAccessHub.decode(HubImageEnvManifestResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func validateSTTConfig() async throws -> HubConfigValidationResponse {
+        let data = try await adminRequest(path: "v1/admin/config/validate/stt", method: "POST", queryItems: [], body: Optional<Data>.none, operatorID: nil)
+        let decoded = try JSONDecoder.reviewAccessHub.decode(HubConfigValidationResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func rotateProviderSecret(target: String, rawValue: String, operatorID: String) async throws -> ProviderSecretRotationResponse {
+        guard target == "elevenlabs-stt" else {
+            throw ReviewAccessHubClientError.adminHTTP(400, "unsupported provider-secret target", "v1/admin/secrets/provider/\(target)")
+        }
+        let normalized = try HubProviderSecretInputValidator.normalized(rawValue)
+        let body = try JSONEncoder.reviewAccessHub.encode(ProviderSecretRotationRequest(value: normalized))
+        let data = try await adminRequest(path: "v1/admin/secrets/provider/elevenlabs-stt", method: "PUT", queryItems: [], body: body, operatorID: operatorID)
+        let decoded = try JSONDecoder.reviewAccessHub.decode(ProviderSecretRotationResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func effectiveModelProfile(_ query: ModelProfileQuery) async throws -> ModelProfileEffectiveResponse {
+        let data = try await adminData(path: "v1/admin/model-profiles/effective", queryItems: query.queryItems)
+        let decoded = try JSONDecoder.reviewAccessHub.decode(ModelProfileEffectiveResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func checkModelProfileConnectivity(_ query: ModelProfileQuery) async throws -> ModelProfileConnectivityResponse {
+        let data = try await adminRequest(path: "v1/admin/model-profiles/connectivity-check", method: "POST", queryItems: query.queryItems, body: Optional<Data>.none, operatorID: nil)
+        let decoded = try JSONDecoder.reviewAccessHub.decode(ModelProfileConnectivityResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    func updateModelProfileBinding(_ query: ModelProfileQuery, operatorID: String, payload: ModelProfileBindingUpdateRequest) async throws -> ModelProfileBindingUpdateResponse {
+        let body = try JSONEncoder.reviewAccessHub.encode(payload)
+        let data = try await adminRequest(path: "v1/admin/model-profiles/bindings", method: "PUT", queryItems: query.queryItems, body: body, operatorID: operatorID)
+        let decoded = try JSONDecoder.reviewAccessHub.decode(ModelProfileBindingUpdateResponse.self, from: data)
+        if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
+        return decoded
+    }
+
+    private func adminRequest(path: String, method: String, queryItems: [URLQueryItem], body: Data?, operatorID: String?) async throws -> Data {
         guard let token = Self.adminTokenFromKeychain()?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
             throw ReviewAccessHubClientError.missingAdminToken
         }
@@ -305,8 +785,15 @@ final class ReviewAccessHubClient {
         }
 
         var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        if let operatorID, !operatorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue(operatorID.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Zenith-Operator")
+        }
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {

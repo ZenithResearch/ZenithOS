@@ -25,6 +25,7 @@ private enum ReviewAccessPolicyTemplate {
 struct ReviewAccessView: View {
     @EnvironmentObject private var hub: HubStore
     @StateObject private var reviewStore = ReviewAccessStore()
+    @StateObject private var runtimeConfigStore = HubRuntimeConfigStore()
 
     @State private var operationMode: ReviewAccessOperationMode = .replaceExisting
     @State private var selectedConfigID: ReviewAccessConfig.ID?
@@ -47,6 +48,7 @@ struct ReviewAccessView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 HubCard { hubConnectionSection }
+                HubCard { HubRuntimeConfigView(store: runtimeConfigStore, hubBaseURL: hub.hubNodeBaseURL) }
                 HubCard { simpleTargetSection }
                 HubCard { codeSection }
                 if !reviewStore.configs.isEmpty {
