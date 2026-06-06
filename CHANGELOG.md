@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Established ZenithOS as a standalone repository under `~/repos` — separates the SwiftUI operator app from the vault workspace so it can have its own remote, CI, and review boundary.
 
 ### Changed
+- Upgraded CI checkout to `actions/checkout@v6` — keeps the Matrix/ZenithOS release-train CI path on the current Node 24-compatible GitHub Actions runtime.
 - Reframed the README as a searchable architecture orientation map — gives public readers and future contributors subsystem ownership, data-flow, credential, and verification boundaries before installation details.
 - Hardened public-repo ignore rules for local secrets, virtualenvs, pycache, logs, sessions, and database artifacts — keeps generated/runtime state out of future commits.
 
