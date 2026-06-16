@@ -67,7 +67,7 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
                     deploymentID: "swrl-web-production",
                     deploymentSlug: "swrl-web-production",
                     allowedOrigin: "https://www.collectswirls.com",
-                    subjectPattern: "https://www.collectswirls.com*"
+                    subjectPattern: "https://www.collectswirls.com/*"
                 ),
                 ReviewAccessPolicy(
                     label: "Local any port",
@@ -84,7 +84,7 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
                     deploymentID: "swrl-ui-production-alias",
                     deploymentSlug: "swrl-ui-production-alias",
                     allowedOrigin: "https://swrl-ui.vercel.app",
-                    subjectPattern: "https://swrl-ui.vercel.app*"
+                    subjectPattern: "https://swrl-ui.vercel.app/*"
                 )
             ]
         case .gallery:
@@ -94,14 +94,14 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
                     deploymentID: "gallery-production-apex",
                     deploymentSlug: "gallery-production-apex",
                     allowedOrigin: "https://gal-ler-y.com",
-                    subjectPattern: "https://gal-ler-y.com*"
+                    subjectPattern: "https://gal-ler-y.com/*"
                 ),
                 ReviewAccessPolicy(
                     label: "Production www",
                     deploymentID: "gallery-production-www",
                     deploymentSlug: "gallery-production-www",
                     allowedOrigin: "https://www.gal-ler-y.com",
-                    subjectPattern: "https://www.gal-ler-y.com*"
+                    subjectPattern: "https://www.gal-ler-y.com/*"
                 ),
                 ReviewAccessPolicy(
                     label: "Local dev",

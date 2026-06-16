@@ -14,6 +14,8 @@ def test_gallery_preset_and_policy_model_exist():
     assert 'case .swrlWeb: return "swrl"' in CONFIG
     assert "swrl-web-production" in CONFIG
     assert "https://www.collectswirls.com" in CONFIG
+    assert 'subjectPattern: "https://www.collectswirls.com/*"' in CONFIG
+    assert 'subjectPattern: "https://swrl-ui.vercel.app/*"' in CONFIG
     assert "https://gal-ler-y.com" in CONFIG
     assert "https://www.gal-ler-y.com" in CONFIG
     assert "http://localhost:*" in CONFIG
@@ -38,8 +40,8 @@ def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert 'subjectPattern: "http://localhost:*/*"' in CONFIG
     assert 'deploymentID: "gallery-production-apex"' in CONFIG
     assert 'deploymentID: "gallery-production-www"' in CONFIG
-    assert 'subjectPattern: "https://gal-ler-y.com*"' in CONFIG
-    assert 'subjectPattern: "https://www.gal-ler-y.com*"' in CONFIG
+    assert 'subjectPattern: "https://gal-ler-y.com/*"' in CONFIG
+    assert 'subjectPattern: "https://www.gal-ler-y.com/*"' in CONFIG
     assert "normalizedRotationPolicies" in VIEW
     assert "ReviewAccessProjectPreset.gallery.defaultPolicies" in VIEW
     assert "legacyGalleryPolicyIDs" in VIEW
