@@ -26,6 +26,7 @@ struct ReviewAccessPolicy: Identifiable, Codable, Equatable {
 }
 
 enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
+    case swrlWeb
     case swrlUI
     case gallery
 
@@ -33,6 +34,7 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .swrlWeb: return "SWRL Web"
         case .swrlUI: return "SWRL UI"
         case .gallery: return "Gallery"
         }
@@ -40,6 +42,7 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
 
     var projectID: String {
         switch self {
+        case .swrlWeb: return "swrl"
         case .swrlUI: return "swrl-ui"
         case .gallery: return "gallery"
         }
@@ -49,6 +52,7 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
 
     var projectName: String {
         switch self {
+        case .swrlWeb: return "SWRL"
         case .swrlUI: return "SWRL UI"
         case .gallery: return "Gallery"
         }
@@ -56,6 +60,23 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
 
     var defaultPolicies: [ReviewAccessPolicy] {
         switch self {
+        case .swrlWeb:
+            return [
+                ReviewAccessPolicy(
+                    label: "Production www",
+                    deploymentID: "swrl-web-production",
+                    deploymentSlug: "swrl-web-production",
+                    allowedOrigin: "https://www.collectswirls.com",
+                    subjectPattern: "https://www.collectswirls.com*"
+                ),
+                ReviewAccessPolicy(
+                    label: "Local any port",
+                    deploymentID: "swrl-web-local",
+                    deploymentSlug: "swrl-web-local",
+                    allowedOrigin: "http://localhost:*",
+                    subjectPattern: "http://localhost:*/*"
+                )
+            ]
         case .swrlUI:
             return [
                 ReviewAccessPolicy(
@@ -69,18 +90,25 @@ enum ReviewAccessProjectPreset: String, CaseIterable, Identifiable {
         case .gallery:
             return [
                 ReviewAccessPolicy(
-                    label: "Production",
-                    deploymentID: "gallery-production",
-                    deploymentSlug: "gallery-production",
+                    label: "Production apex",
+                    deploymentID: "gallery-production-apex",
+                    deploymentSlug: "gallery-production-apex",
                     allowedOrigin: "https://gal-ler-y.com",
-                    subjectPattern: "https://gal-ler-y.com/*"
+                    subjectPattern: "https://gal-ler-y.com*"
+                ),
+                ReviewAccessPolicy(
+                    label: "Production www",
+                    deploymentID: "gallery-production-www",
+                    deploymentSlug: "gallery-production-www",
+                    allowedOrigin: "https://www.gal-ler-y.com",
+                    subjectPattern: "https://www.gal-ler-y.com*"
                 ),
                 ReviewAccessPolicy(
                     label: "Local dev",
                     deploymentID: "gallery-local",
                     deploymentSlug: "gallery-local",
-                    allowedOrigin: "http://localhost:3000",
-                    subjectPattern: "http://localhost:3000/*"
+                    allowedOrigin: "http://localhost:*",
+                    subjectPattern: "http://localhost:*/*"
                 )
             ]
         }
@@ -233,30 +261,11 @@ struct ReviewAccessConfig: Identifiable, Codable, Equatable {
     }
     static func normalizedPolicies(_ policies: [ReviewAccessPolicy], projectID: String) -> [ReviewAccessPolicy] {
         guard projectID == ReviewAccessProjectPreset.gallery.projectID else { return policies }
-        return policies.map { policy in
-            switch policy.deploymentID {
-            case "gallery-dev":
-                return ReviewAccessPolicy(
-                    id: policy.id,
-                    label: policy.label.isEmpty ? "Local dev" : policy.label,
-                    deploymentID: "gallery-local",
-                    deploymentSlug: "gallery-local",
-                    allowedOrigin: "http://localhost:3000",
-                    subjectPattern: "http://localhost:3000/*"
-                )
-            case "gallery-prod":
-                return ReviewAccessPolicy(
-                    id: policy.id,
-                    label: policy.label.isEmpty ? "Production" : policy.label,
-                    deploymentID: "gallery-production",
-                    deploymentSlug: "gallery-production",
-                    allowedOrigin: "https://gal-ler-y.com",
-                    subjectPattern: "https://gal-ler-y.com/*"
-                )
-            default:
-                return policy
-            }
-        }
+        // Hub now rejects any Gallery rotation that is not the exact canonical
+        // apex + www + local policy set. Decode-time normalization should
+        // therefore discard stale local Gallery policy metadata rather than
+        // resurfacing old two-policy or gallery-dev/gallery-prod records.
+        return ReviewAccessProjectPreset.gallery.defaultPolicies
     }
 }
 
