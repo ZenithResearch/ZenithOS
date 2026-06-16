@@ -260,12 +260,22 @@ struct ReviewAccessConfig: Identifiable, Codable, Equatable {
         ]
     }
     static func normalizedPolicies(_ policies: [ReviewAccessPolicy], projectID: String) -> [ReviewAccessPolicy] {
-        guard projectID == ReviewAccessProjectPreset.gallery.projectID else { return policies }
-        // Hub now rejects any Gallery rotation that is not the exact canonical
-        // apex + www + local policy set. Decode-time normalization should
-        // therefore discard stale local Gallery policy metadata rather than
-        // resurfacing old two-policy or gallery-dev/gallery-prod records.
-        return ReviewAccessProjectPreset.gallery.defaultPolicies
+        switch projectID {
+        case ReviewAccessProjectPreset.gallery.projectID:
+            // Hub now rejects any Gallery rotation that is not the exact canonical
+            // apex + www + local policy set. Decode-time normalization should
+            // therefore discard stale local Gallery policy metadata rather than
+            // resurfacing old two-policy or gallery-dev/gallery-prod records.
+            return ReviewAccessProjectPreset.gallery.defaultPolicies
+        case ReviewAccessProjectPreset.swrlWeb.projectID:
+            // Older local app metadata used `swrl-local` plus bare-host
+            // production patterns like https://www.collectswirls.com*. Live Hub
+            // validates the subject-pattern origin strictly, so normalize SWRL
+            // Web saved rows back to the canonical production + local policies.
+            return ReviewAccessProjectPreset.swrlWeb.defaultPolicies
+        default:
+            return policies
+        }
     }
 }
 

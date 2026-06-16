@@ -36,6 +36,8 @@ def test_safe_config_migrates_legacy_single_policy_fields():
 def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert "normalizedPolicies" in CONFIG
     assert "discard stale local Gallery policy metadata" in CONFIG
+    assert "Older local app metadata used `swrl-local`" in CONFIG
+    assert "ReviewAccessProjectPreset.swrlWeb.defaultPolicies" in CONFIG
     assert 'deploymentID: "gallery-local"' in CONFIG
     assert 'subjectPattern: "http://localhost:*/*"' in CONFIG
     assert 'deploymentID: "gallery-production-apex"' in CONFIG
