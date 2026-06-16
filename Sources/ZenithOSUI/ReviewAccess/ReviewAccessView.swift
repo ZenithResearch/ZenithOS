@@ -32,6 +32,7 @@ struct ReviewAccessView: View {
     @State private var selectedContactID: VaultContact.ID?
     @State private var clientName = ""
     @State private var clientSlug = ""
+    @State private var accessLabel = ""
     @State private var projectID = ReviewAccessProjectPreset.gallery.projectID
     @State private var projectName = ReviewAccessProjectPreset.gallery.projectName
     @State private var selectedPreset: ReviewAccessProjectPreset = .gallery
@@ -50,6 +51,7 @@ struct ReviewAccessView: View {
                 HubCard { hubConnectionSection }
                 HubCard { HubRuntimeConfigView(store: runtimeConfigStore, hubBaseURL: hub.hubNodeBaseURL) }
                 HubCard { simpleTargetSection }
+                HubCard { policiesSection }
                 HubCard { codeSection }
                 if !reviewStore.configs.isEmpty {
                     HubCard { savedConfigsSection }
@@ -70,7 +72,7 @@ struct ReviewAccessView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Reviewer access codes", systemImage: "key.viewfinder")
                 .font(.title2.weight(.semibold))
-            Text("Pick the reviewer row, then generate a fresh reviewer key or paste the existing one. ZenithOS now sends the canonical allowed environments for the selected project instead of making you edit policy rows by hand.")
+            Text("Pick the reviewer row, then generate a fresh reviewer key or paste the existing one. ZenithOS sends the allowed environment rows shown below, where you can add or edit production, preview, staging, and localhost origins before rotating.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -80,7 +82,7 @@ struct ReviewAccessView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Review target", systemImage: "person.text.rectangle")
                 .font(.headline)
-            Text("Normal flow: select the saved reviewer access row, choose the project preset if needed, then rotate the reviewer key. Stale local policy records are ignored; the final allowed environments below are generated from the project preset.")
+            Text("Normal flow: select the saved reviewer access row, choose the project preset if needed, then edit the allowed environments below before rotating the reviewer key.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -91,6 +93,9 @@ struct ReviewAccessView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Row ID: \(targetAccessCodeID)")
+                    .font(.caption.weight(.semibold).monospaced())
+                    .textSelection(.enabled)
+                Text("Access label: \(effectiveAccessLabel)")
                     .font(.caption.weight(.semibold).monospaced())
                     .textSelection(.enabled)
             }
@@ -180,6 +185,11 @@ struct ReviewAccessView: View {
                     TextField("reviewer-slug", text: $clientSlug)
                         .textFieldStyle(.roundedBorder)
                         .font(.body.monospaced())
+                    TextField("Access label returned to apps, e.g. Dan Admin", text: $accessLabel)
+                        .textFieldStyle(.roundedBorder)
+                    Text("For SWRL Web admin login, use the label `Dan Admin` or `SWRL Admin`; `swrl-web` checks this label server-side after Hub auth succeeds.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -677,6 +687,7 @@ struct ReviewAccessView: View {
             Text("Access row: \(targetAccessCodeID)")
                 .font(.caption.weight(.semibold).monospaced())
             Text("Client: \(clientName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "—") (\(ReviewAccessCodeFactory.slug(from: clientSlug)))")
+            Text("Access label: \(effectiveAccessLabel)")
             Text("Project: \(projectID.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "—")")
             Text("Policies: \(effectiveRotationPolicies.count)")
             ForEach(effectiveRotationPolicies) { policy in
@@ -739,6 +750,9 @@ struct ReviewAccessView: View {
         if clientSlug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             blockers.append("Client slug is required")
         }
+        if effectiveAccessLabel.isEmpty {
+            blockers.append("Access label is required")
+        }
         if projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             blockers.append("Project ID is required")
         }
@@ -783,6 +797,12 @@ struct ReviewAccessView: View {
         )
     }
 
+    private var effectiveAccessLabel: String {
+        let trimmed = accessLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return clientName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var generateButtonTitle: String {
         switch effectiveOperationMode {
         case .replaceExisting:
@@ -810,6 +830,9 @@ struct ReviewAccessView: View {
         }
         if ReviewAccessCodeFactory.slug(from: clientSlug) != selectedConfig.clientSlug {
             mismatches.append("Client slug differs: selected target uses \(selectedConfig.clientSlug)")
+        }
+        if effectiveAccessLabel != selectedConfig.accessLabel {
+            mismatches.append("Access label differs: selected target uses \(selectedConfig.accessLabel)")
         }
         if projectID.trimmingCharacters(in: .whitespacesAndNewlines) != selectedConfig.projectID {
             mismatches.append("Project ID differs: selected target uses \(selectedConfig.projectID)")
@@ -839,7 +862,12 @@ struct ReviewAccessView: View {
             if deploymentID.isEmpty { messages.append("\(label): deployment ID is required") }
             if origin.isEmpty { messages.append("\(label): allowed origin is required") }
             if subject.isEmpty { messages.append("\(label): subject pattern is required") }
-            if !origin.isEmpty, let originURL = URL(string: origin) {
+            let isLocalAnyPortOrigin = ["http://localhost:*", "https://localhost:*", "http://127.0.0.1:*", "https://127.0.0.1:*"].contains(origin)
+            if isLocalAnyPortOrigin {
+                if !subject.hasPrefix(origin) {
+                    messages.append("\(label): subject pattern origin must match allowed origin")
+                }
+            } else if !origin.isEmpty, let originURL = URL(string: origin) {
                 if originURL.scheme == nil || originURL.host == nil || !["", "/"].contains(originURL.path) {
                     messages.append("\(label): allowed origin must be an origin, not a path")
                 }
@@ -891,6 +919,9 @@ struct ReviewAccessView: View {
         guard let contact = selectedContact else { return }
         clientName = contact.displayName
         clientSlug = ReviewAccessCodeFactory.slug(from: contact.displayName)
+        if accessLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            accessLabel = contact.displayName
+        }
     }
 
     private func applySelectedConfigDefaults() {
@@ -903,6 +934,7 @@ struct ReviewAccessView: View {
         selectedContactID = contactID(from: config.rolodexEntryPath)
         clientName = config.clientName
         clientSlug = config.clientSlug
+        accessLabel = config.accessLabel
         projectID = config.projectID
         projectName = config.projectName
         policies = normalizedRotationPolicies(config.policies, projectID: config.projectID)
@@ -923,6 +955,9 @@ struct ReviewAccessView: View {
         projectID = preset.projectID
         projectName = preset.projectName
         policies = preset.defaultPolicies
+        if preset == .swrlWeb, accessLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            accessLabel = "Dan Admin"
+        }
         allowEditedReplacementMetadata = false
         statusMessage = "Loaded \(preset.label) project defaults with \(preset.defaultPolicies.count) allowed environment policies."
     }
@@ -931,10 +966,10 @@ struct ReviewAccessView: View {
         switch template {
         case .localhost:
             policies.append(ReviewAccessPolicy(
-                label: "Local dev",
+                label: "Local any port",
                 deploymentID: "\(ReviewAccessCodeFactory.slug(from: projectID))-local",
-                allowedOrigin: "http://localhost:3000",
-                subjectPattern: "http://localhost:3000/*"
+                allowedOrigin: "http://localhost:*",
+                subjectPattern: "http://localhost:*/*"
             ))
         case .custom:
             policies.append(ReviewAccessPolicy(
@@ -978,7 +1013,7 @@ struct ReviewAccessView: View {
         let expected = normalizedPolicies(ReviewAccessProjectPreset.gallery.defaultPolicies)
         let actual = normalizedPolicies(effective)
         if actual != expected {
-            return ["Gallery review access must rotate exactly the canonical Gallery production and local policies"]
+            return ["Gallery review access must rotate exactly the canonical gallery-production-apex, gallery-production-www, and gallery-local policies"]
         }
         return []
     }
@@ -995,7 +1030,7 @@ struct ReviewAccessView: View {
                 subjectPattern: policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
-        let legacyGalleryPolicyIDs = Set(["gallery-dev", "gallery-prod", "gallery-local", "gallery-production"])
+        let legacyGalleryPolicyIDs = Set(["gallery-dev", "gallery-prod", "gallery-local", "gallery-production", "gallery-production-apex", "gallery-production-www"])
         if projectIdentifier == ReviewAccessProjectPreset.gallery.projectID,
            trimmedPolicies.count == 1,
            legacyGalleryPolicyIDs.contains(trimmedPolicies[0].deploymentID) {
@@ -1094,7 +1129,7 @@ struct ReviewAccessView: View {
             subjectPattern: compatibilityPolicy?.subjectPattern,
             policies: policyPayloads,
             accessCodeID: targetAccessCodeID,
-            accessLabel: clientName.trimmingCharacters(in: .whitespacesAndNewlines),
+            accessLabel: effectiveAccessLabel,
             mode: mode,
             accessCode: rawCode,
             deploymentScopedAccess: false
@@ -1117,7 +1152,7 @@ struct ReviewAccessView: View {
             projectName: projectName.trimmingCharacters(in: .whitespacesAndNewlines),
             policies: rotationPolicies,
             accessCodeID: accessID,
-            accessLabel: clientName.trimmingCharacters(in: .whitespacesAndNewlines),
+            accessLabel: effectiveAccessLabel,
             lastRotatedAt: lastRotatedAt,
             active: true
         ))

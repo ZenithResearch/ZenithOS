@@ -9,10 +9,18 @@ VIEW = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift").read_te
 def test_gallery_preset_and_policy_model_exist():
     assert "struct ReviewAccessPolicy" in CONFIG
     assert "enum ReviewAccessProjectPreset" in CONFIG
+    assert "case swrlWeb" in CONFIG
     assert "case gallery" in CONFIG
+    assert 'case .swrlWeb: return "swrl"' in CONFIG
+    assert "swrl-web-production" in CONFIG
+    assert "https://www.collectswirls.com" in CONFIG
     assert "https://gal-ler-y.com" in CONFIG
-    assert "http://localhost:3000" in CONFIG
-    assert "gallery-production" in CONFIG
+    assert "https://www.gal-ler-y.com" in CONFIG
+    assert "http://localhost:*" in CONFIG
+    assert "http://localhost:*/*" in CONFIG
+    assert "swrl-web-local" in CONFIG
+    assert "gallery-production-apex" in CONFIG
+    assert "gallery-production-www" in CONFIG
     assert "gallery-local" in CONFIG
 
 
@@ -25,17 +33,18 @@ def test_safe_config_migrates_legacy_single_policy_fields():
 
 def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert "normalizedPolicies" in CONFIG
-    assert 'case "gallery-dev"' in CONFIG
+    assert "discard stale local Gallery policy metadata" in CONFIG
     assert 'deploymentID: "gallery-local"' in CONFIG
-    assert 'subjectPattern: "http://localhost:3000/*"' in CONFIG
-    assert 'case "gallery-prod"' in CONFIG
-    assert 'deploymentID: "gallery-production"' in CONFIG
-    assert 'subjectPattern: "https://gal-ler-y.com/*"' in CONFIG
+    assert 'subjectPattern: "http://localhost:*/*"' in CONFIG
+    assert 'deploymentID: "gallery-production-apex"' in CONFIG
+    assert 'deploymentID: "gallery-production-www"' in CONFIG
+    assert 'subjectPattern: "https://gal-ler-y.com*"' in CONFIG
+    assert 'subjectPattern: "https://www.gal-ler-y.com*"' in CONFIG
     assert "normalizedRotationPolicies" in VIEW
     assert "ReviewAccessProjectPreset.gallery.defaultPolicies" in VIEW
     assert "legacyGalleryPolicyIDs" in VIEW
     assert "let rotationPolicies = normalizedRotationPolicies(policies, projectID: projectIdentifier)" in VIEW
-    assert "Gallery review access must rotate exactly the canonical Gallery production and local policies" in VIEW
+    assert "Gallery review access must rotate exactly the canonical gallery-production-apex, gallery-production-www, and gallery-local policies" in VIEW
     assert "effectiveRotationPolicies" in VIEW
     assert "rotationBlockers" in VIEW
     assert "Paste existing reviewer key" in VIEW
@@ -43,9 +52,12 @@ def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert "Create new Hub row" in VIEW
     assert "Mode: create a new Hub review-access row" in VIEW
     assert "Allowed environments sent to Hub" in VIEW
-    assert "Stale local policy records are ignored" in VIEW
+    assert "edit the allowed environments" in VIEW
+    assert "HubCard { policiesSection }" in VIEW
     assert "Metadata differences" in VIEW
     assert "Differences here are informational" in VIEW
+    assert "Access label returned to apps" in VIEW
+    assert "Dan Admin" in VIEW
 
 
 def test_rotate_request_sends_policies_and_decodes_policy_count():
@@ -67,9 +79,20 @@ def test_view_sends_first_policy_as_legacy_compatibility_metadata():
     assert "compat_deployment_id=" in VIEW
 
 
+def test_view_sends_explicit_access_label_separate_from_client_name():
+    assert "@State private var accessLabel" in VIEW
+    assert "private var effectiveAccessLabel" in VIEW
+    assert "accessLabel = config.accessLabel" in VIEW
+    assert "accessLabel: effectiveAccessLabel" in VIEW
+    assert "Access label differs" in VIEW
+
+
 def test_view_uses_allowed_environments_instead_of_single_scope_only():
     assert "Allowed environments" in VIEW
     assert "Add Gallery defaults" in VIEW
+    assert "Add Localhost" in VIEW
+    assert "http://localhost:*" in VIEW
+    assert "Local any port" in VIEW
     assert "policy_count" in VIEW
     assert "policy[" in VIEW
     assert "reviewAccessPayload" in VIEW

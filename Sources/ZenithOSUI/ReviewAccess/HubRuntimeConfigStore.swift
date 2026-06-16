@@ -20,7 +20,13 @@ final class HubRuntimeConfigStore: ObservableObject {
     }
 
     var supportsElevenLabsSecretRotation: Bool {
-        runtimeConfig?.providerSecretWrites?.supported == true && elevenLabsSecretTarget != nil
+        guard runtimeConfig?.providerSecretWrites?.supported == true,
+              let target = elevenLabsSecretTarget,
+              target.backend == nil || target.backend == "aws_secrets_manager",
+              target.status == nil || target.status == "configured" || target.status == "enabled" else {
+            return false
+        }
+        return true
     }
 
     var providerSecretBackendDescription: String {

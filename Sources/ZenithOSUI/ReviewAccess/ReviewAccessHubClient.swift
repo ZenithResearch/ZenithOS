@@ -284,6 +284,7 @@ struct HubRuntimeSecretStatus: Decodable, Identifiable {
         case source
         case service
         case configured
+        case preview
         case handlePreview = "handle_preview"
         case lastCheckedAt = "last_checked_at"
     }
@@ -304,6 +305,7 @@ struct HubRuntimeSecretStatus: Decodable, Identifiable {
         service = try container.decodeIfPresent(String.self, forKey: .service)
         configured = try container.decodeIfPresent(Bool.self, forKey: .configured)
         handlePreview = try container.decodeIfPresent(String.self, forKey: .handlePreview)
+            ?? container.decodeIfPresent(String.self, forKey: .preview)
         lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt)
     }
 }
@@ -321,6 +323,11 @@ struct ProviderSecretWriteTarget: Decodable, Identifiable {
     var endpoint: String?
     var secretKey: String?
     var backend: String?
+    var handlePreview: String?
+    var restartRequired: Bool?
+    var consumerServices: [String]
+    var status: String?
+    var lastRotatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case target
@@ -328,6 +335,25 @@ struct ProviderSecretWriteTarget: Decodable, Identifiable {
         case endpoint
         case secretKey = "secret_key"
         case backend
+        case handlePreview = "handle_preview"
+        case restartRequired = "restart_required"
+        case consumerServices = "consumer_services"
+        case status
+        case lastRotatedAt = "last_rotated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decode(String.self, forKey: .target)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint)
+        secretKey = try container.decodeIfPresent(String.self, forKey: .secretKey)
+        backend = try container.decodeIfPresent(String.self, forKey: .backend)
+        handlePreview = try container.decodeIfPresent(String.self, forKey: .handlePreview)
+        restartRequired = try container.decodeIfPresent(Bool.self, forKey: .restartRequired)
+        consumerServices = try container.decodeIfPresent([String].self, forKey: .consumerServices) ?? []
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        lastRotatedAt = try container.decodeIfPresent(Date.self, forKey: .lastRotatedAt)
     }
 }
 
@@ -464,6 +490,7 @@ struct ModelProfileEffectiveResponse: Decodable {
     var provider: String?
     var model: String?
     var endpoint: ModelProfileEndpoint?
+    var endpointRef: String?
     var runtime: ModelProfileRuntime?
     var fallbackProfile: String?
     var secret: ModelProfileSecretStatus?
@@ -476,10 +503,39 @@ struct ModelProfileEffectiveResponse: Decodable {
         case provider
         case model
         case endpoint
+        case endpointRef = "endpoint_ref"
         case runtime
+        case timeoutSeconds = "timeout_seconds"
+        case temperature
+        case maxTokens = "max_tokens"
+        case enabled
         case fallbackProfile = "fallback_profile"
         case secret
         case secretsPrinted = "secrets_printed"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        deploymentProfile = try container.decodeIfPresent(String.self, forKey: .deploymentProfile)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        endpoint = try container.decodeIfPresent(ModelProfileEndpoint.self, forKey: .endpoint)
+        endpointRef = try container.decodeIfPresent(String.self, forKey: .endpointRef)
+        if let nestedRuntime = try container.decodeIfPresent(ModelProfileRuntime.self, forKey: .runtime) {
+            runtime = nestedRuntime
+        } else {
+            runtime = ModelProfileRuntime(
+                timeout: try container.decodeIfPresent(Double.self, forKey: .timeoutSeconds),
+                temperature: try container.decodeIfPresent(Double.self, forKey: .temperature),
+                maxTokens: try container.decodeIfPresent(Int.self, forKey: .maxTokens),
+                enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled)
+            )
+        }
+        fallbackProfile = try container.decodeIfPresent(String.self, forKey: .fallbackProfile)
+        secret = try container.decodeIfPresent(ModelProfileSecretStatus.self, forKey: .secret)
+        secretsPrinted = try container.decodeIfPresent(Bool.self, forKey: .secretsPrinted) ?? false
     }
 }
 
@@ -552,12 +608,31 @@ struct ModelProfileBindingUpdateRequest: Encodable {
     var enabled: Bool?
 
     enum CodingKeys: String, CodingKey {
+        case updates
+        case connectivityResult = "connectivity_result"
+    }
+
+    enum UpdateKeys: String, CodingKey {
         case provider
         case model
-        case endpointHandle = "endpoint_handle"
+        case endpointRef = "endpoint_ref"
         case fallbackProfile = "fallback_profile"
-        case runtime
-        case enabled
+        case timeoutSeconds = "timeout_seconds"
+        case temperature
+        case maxTokens = "max_tokens"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        var updates = container.nestedContainer(keyedBy: UpdateKeys.self, forKey: .updates)
+        try updates.encodeIfPresent(provider, forKey: .provider)
+        try updates.encodeIfPresent(model, forKey: .model)
+        try updates.encodeIfPresent(endpointHandle, forKey: .endpointRef)
+        try updates.encodeIfPresent(fallbackProfile, forKey: .fallbackProfile)
+        try updates.encodeIfPresent(runtime?.timeout, forKey: .timeoutSeconds)
+        try updates.encodeIfPresent(runtime?.temperature, forKey: .temperature)
+        try updates.encodeIfPresent(runtime?.maxTokens, forKey: .maxTokens)
+        try container.encodeNil(forKey: .connectivityResult)
     }
 }
 
@@ -678,7 +753,7 @@ final class ReviewAccessHubClient {
             return "redacted empty response"
         }
         let lowered = text.lowercased()
-        let sensitiveMarkers = ["token", "secret", "password", "access_code", "authorization", "bearer", "raw_code"]
+        let sensitiveMarkers = ["token", "secret", "password", "access_code", "authorization", "bearer", "raw_code", "arn:"]
         guard !sensitiveMarkers.contains(where: { lowered.contains($0) }) else {
             return "redacted response body"
         }
@@ -775,12 +850,12 @@ final class ReviewAccessHubClient {
     }
 
     func rotateProviderSecret(target: String, rawValue: String, operatorID: String) async throws -> ProviderSecretRotationResponse {
-        guard target == "elevenlabs-stt" else {
-            throw ReviewAccessHubClientError.adminHTTP(400, "unsupported provider-secret target", "v1/admin/secrets/provider/\(target)")
+        guard target.range(of: #"^[a-z0-9][a-z0-9._-]{0,63}$"#, options: .regularExpression) != nil else {
+            throw ReviewAccessHubClientError.adminHTTP(400, "invalid provider-secret target", "v1/admin/secrets/provider")
         }
         let normalized = try HubProviderSecretInputValidator.normalized(rawValue)
         let body = try JSONEncoder.reviewAccessHub.encode(ProviderSecretRotationRequest(value: normalized))
-        let data = try await adminRequest(path: "v1/admin/secrets/provider/elevenlabs-stt", method: "PUT", queryItems: [], body: body, operatorID: operatorID)
+        let data = try await adminRequest(path: "v1/admin/secrets/provider/\(target)", method: "PUT", queryItems: [], body: body, operatorID: operatorID)
         let decoded = try JSONDecoder.reviewAccessHub.decode(ProviderSecretRotationResponse.self, from: data)
         if decoded.secretsPrinted { throw ReviewAccessHubClientError.secretsPrinted }
         return decoded
