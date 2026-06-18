@@ -109,6 +109,65 @@ struct ReviewAccessRotateResponse: Decodable {
     }
 }
 
+
+
+struct ReviewAccessPreflightPolicy: Decodable, Equatable, Hashable {
+    var deploymentID: String
+    var deploymentSlug: String
+    var allowedOrigin: String
+    var subjectPattern: String
+
+    enum CodingKeys: String, CodingKey {
+        case deploymentID = "deployment_id"
+        case deploymentSlug = "deployment_slug"
+        case allowedOrigin = "allowed_origin"
+        case subjectPattern = "subject_pattern"
+    }
+}
+
+struct ReviewAccessPreflightResponse: Decodable {
+    var ok: Bool
+    var clientID: String
+    var projectID: String
+    var deploymentID: String?
+    var accessCodeID: String
+    var accessLabel: String
+    var projectScopedAccess: Bool
+    var emailConfigured: Bool
+    var policyCount: Int
+    var policies: [ReviewAccessPreflightPolicy]
+    var secretsPrinted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case clientID = "client_id"
+        case projectID = "project_id"
+        case deploymentID = "deployment_id"
+        case accessCodeID = "access_code_id"
+        case accessLabel = "access_label"
+        case projectScopedAccess = "project_scoped_access"
+        case emailConfigured = "email_configured"
+        case policyCount = "policy_count"
+        case policies
+        case secretsPrinted = "secrets_printed"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? false
+        clientID = try container.decode(String.self, forKey: .clientID)
+        projectID = try container.decode(String.self, forKey: .projectID)
+        deploymentID = try container.decodeIfPresent(String.self, forKey: .deploymentID)
+        accessCodeID = try container.decode(String.self, forKey: .accessCodeID)
+        accessLabel = try container.decode(String.self, forKey: .accessLabel)
+        projectScopedAccess = try container.decodeIfPresent(Bool.self, forKey: .projectScopedAccess) ?? true
+        emailConfigured = try container.decodeIfPresent(Bool.self, forKey: .emailConfigured) ?? false
+        policies = try container.decodeIfPresent([ReviewAccessPreflightPolicy].self, forKey: .policies) ?? []
+        policyCount = try container.decodeIfPresent(Int.self, forKey: .policyCount) ?? policies.count
+        secretsPrinted = try container.decodeIfPresent(Bool.self, forKey: .secretsPrinted) ?? false
+    }
+}
+
 struct ReviewAccessCapabilitiesResponse: Decodable {
     var ok: Bool
     var hub: String
@@ -922,6 +981,33 @@ final class ReviewAccessHubClient {
             throw ReviewAccessHubClientError.adminHTTP(http.statusCode, Self.safeErrorBody(from: data), path)
         }
         return data
+    }
+
+
+    func preflight(_ payload: ReviewAccessRotateRequest, adminToken rawToken: String) async throws -> ReviewAccessPreflightResponse {
+        let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw ReviewAccessHubClientError.missingAdminToken
+        }
+        let endpoint = baseURL.appendingPathComponent("v1/admin/review-auth/access-codes/preflight")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder.reviewAccessHub.encode(payload)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ReviewAccessHubClientError.http(0, "Non-HTTP response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ReviewAccessHubClientError.http(http.statusCode, Self.safeErrorBody(from: data))
+        }
+        let decoded = try JSONDecoder.reviewAccessHub.decode(ReviewAccessPreflightResponse.self, from: data)
+        if decoded.secretsPrinted {
+            throw ReviewAccessHubClientError.secretsPrinted
+        }
+        return decoded
     }
 
     func rotate(_ payload: ReviewAccessRotateRequest, adminToken rawToken: String) async throws -> ReviewAccessRotateResponse {

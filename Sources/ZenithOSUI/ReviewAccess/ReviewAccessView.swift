@@ -22,6 +22,25 @@ private enum ReviewAccessPolicyTemplate {
     case custom
 }
 
+
+private enum ReviewAccessPreflightStatus: Equatable {
+    case notRun
+    case running
+    case accepted
+    case rejected(String)
+    case unavailable(String)
+
+    var label: String {
+        switch self {
+        case .notRun: return "Not run"
+        case .running: return "Running…"
+        case .accepted: return "Server OK"
+        case .rejected: return "Server rejected"
+        case .unavailable: return "Unavailable"
+        }
+    }
+}
+
 enum PolicyRowBadge: String, CaseIterable, Equatable, Hashable {
     case canonical
     case edited
@@ -120,6 +139,10 @@ struct ReviewAccessView: View {
     @State private var statusMessage: String?
     @State private var debugLog: String?
     @State private var debugDrawerExpanded = false
+    @State private var preflightStatus: ReviewAccessPreflightStatus = .notRun
+    @State private var preflightFingerprint: String?
+    @State private var preflightPolicyKeys = Set<String>()
+    @State private var isPreflighting = false
     @State private var isSubmitting = false
 
     var body: some View {
@@ -824,6 +847,7 @@ struct ReviewAccessView: View {
                 .foregroundStyle(.secondary)
 
             rotationSummary
+            preflightSection
             rotationReadinessSummary
 
             VStack(alignment: .leading, spacing: 10) {
@@ -962,6 +986,79 @@ struct ReviewAccessView: View {
         }
     }
 
+
+    private var preflightSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Label("Hub preflight: \(preflightStatus.label)", systemImage: preflightStatusIcon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(preflightStatusColor)
+                Button("Run preflight") { Task { await runPreflight() } }
+                    .controlSize(.small)
+                    .disabled(!canRunPreflight)
+            }
+            Text(preflightHelpText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if case .rejected(let message) = preflightStatus, preflightFingerprint == currentPreflightFingerprint {
+                Text("Hub rejected current payload: \(message)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.red)
+            }
+            if case .unavailable(let message) = preflightStatus, preflightFingerprint == currentPreflightFingerprint {
+                Text("Preflight unavailable: \(message)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(preflightStatusColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var preflightHelpText: String {
+        if preflightFingerprint != nil, preflightFingerprint != currentPreflightFingerprint {
+            return "The payload changed after the last preflight; rerun preflight before relying on the server badge. Rotate is blocked only if Hub rejected the current payload."
+        }
+        switch preflightStatus {
+        case .notRun:
+            return "Validate the exact public rotate payload with Hub before generating or pasting a reviewer key. This writes nothing and never sends a raw code."
+        case .running:
+            return "Asking Hub to validate the exact public payload without persistence."
+        case .accepted:
+            return "Hub accepted the current payload. Final rotate will still use the same public fields plus the generated/provided reviewer key."
+        case .rejected:
+            return "Hub has rejected the current payload; fix the highlighted fields or reset canonical policies before rotating."
+        case .unavailable:
+            return "This Hub does not expose preflight yet or could not be reached. ZenithOS keeps graceful degradation and does not block rotate solely for unavailable preflight."
+        }
+    }
+
+    private var preflightStatusIcon: String {
+        switch preflightStatus {
+        case .notRun: return "questionmark.circle"
+        case .running: return "hourglass"
+        case .accepted: return "checkmark.seal.fill"
+        case .rejected: return "xmark.octagon.fill"
+        case .unavailable: return "wifi.slash"
+        }
+    }
+
+    private var preflightStatusColor: Color {
+        switch preflightStatus {
+        case .notRun: return .secondary
+        case .running: return .blue
+        case .accepted: return .green
+        case .rejected: return .red
+        case .unavailable: return .orange
+        }
+    }
+
+    private var canRunPreflight: Bool {
+        !isPreflighting && !isSubmitting && baseMetadataIsReady && policyValidationMessages.isEmpty && hub.reviewAccessAdminVerified
+    }
+
     private var rotationSummary: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(effectiveOperationMode == .replaceExisting ? "Final target: replacing existing access record" : "Final target: creating new access record")
@@ -1024,6 +1121,13 @@ struct ReviewAccessView: View {
         rotationBlockers.isEmpty
     }
 
+    private var baseMetadataIsReady: Bool {
+        !clientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !clientSlug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !effectiveAccessLabel.isEmpty &&
+        !projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var rotationBlockers: [String] {
         var blockers: [String] = []
         if clientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1043,6 +1147,12 @@ struct ReviewAccessView: View {
         }
         if isSubmitting {
             blockers.append("Rotation request is already running")
+        }
+        if isPreflighting {
+            blockers.append("Preflight request is still running")
+        }
+        if case .rejected(let message) = preflightStatus, preflightFingerprint == currentPreflightFingerprint {
+            blockers.append("Hub preflight rejected current payload: \(message)")
         }
         blockers.append(contentsOf: policyValidationMessages)
         if effectiveOperationMode == .replaceExisting, selectedConfig == nil {
@@ -1332,6 +1442,124 @@ struct ReviewAccessView: View {
         return ReviewAccessConfig.normalizedPolicies(trimmedPolicies, projectID: projectIdentifier)
     }
 
+
+    private var currentPreflightFingerprint: String {
+        let payload = reviewAccessPayload(mode: .generate, rawCode: nil)
+        return preflightFingerprint(for: payload)
+    }
+
+    private func preflightFingerprint(for payload: ReviewAccessRotateRequest) -> String {
+        var parts = [
+            payload.clientID,
+            payload.clientSlug,
+            payload.clientName,
+            payload.projectID,
+            payload.projectSlug,
+            payload.projectName,
+            payload.deploymentID ?? "",
+            payload.deploymentSlug ?? "",
+            payload.allowedOrigin ?? "",
+            payload.subjectPattern ?? "",
+            payload.accessCodeID,
+            payload.accessLabel,
+            String(payload.deploymentScopedAccess)
+        ]
+        payload.policies.forEach { policy in
+            parts.append(contentsOf: [policy.deploymentID, policy.deploymentSlug, policy.allowedOrigin, policy.subjectPattern])
+        }
+        return parts.joined(separator: "\u{1f}")
+    }
+
+    private func preflightPolicyKey(_ policy: ReviewAccessPolicy) -> String {
+        [
+            policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.allowedOrigin.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        ].joined(separator: "\u{1f}")
+    }
+
+    private func preflightPolicyKey(_ policy: ReviewAccessPreflightPolicy) -> String {
+        [
+            policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.allowedOrigin.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        ].joined(separator: "\u{1f}")
+    }
+
+    private func preflightServerAcceptance(for policy: ReviewAccessPolicy) -> Bool? {
+        guard preflightFingerprint == currentPreflightFingerprint else { return nil }
+        switch preflightStatus {
+        case .accepted:
+            return preflightPolicyKeys.contains(preflightPolicyKey(policy))
+        case .rejected:
+            return false
+        case .notRun, .running, .unavailable:
+            return nil
+        }
+    }
+
+    private func runPreflight() async {
+        guard canRunPreflight else {
+            statusMessage = "Cannot run preflight yet: \(rotationBlockers.joined(separator: "; "))."
+            return
+        }
+        let payload = reviewAccessPayload(mode: .generate, rawCode: nil)
+        let fingerprint = preflightFingerprint(for: payload)
+        let requestID = UUID().uuidString
+        guard let adminToken = ReviewAccessHubClient.adminTokenFromKeychain()?.trimmingCharacters(in: .whitespacesAndNewlines), !adminToken.isEmpty else {
+            preflightStatus = .rejected(ReviewAccessHubClientError.missingAdminToken.localizedDescription)
+            preflightFingerprint = fingerprint
+            statusMessage = ReviewAccessHubClientError.missingAdminToken.localizedDescription
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: "")
+                + "\npreflight_status=failure"
+                + "\nerror_description=\(ReviewAccessHubClientError.missingAdminToken.localizedDescription)"
+            return
+        }
+        preflightStatus = .running
+        preflightFingerprint = fingerprint
+        preflightPolicyKeys = []
+        isPreflighting = true
+        statusMessage = "Running Hub preflight without sending a raw reviewer key…"
+        debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: adminToken)
+        defer { isPreflighting = false }
+
+        do {
+            let response = try await ReviewAccessHubClient(baseURL: hub.hubNodeBaseURL).preflight(payload, adminToken: adminToken)
+            preflightPolicyKeys = Set(response.policies.map(preflightPolicyKey))
+            preflightStatus = .accepted
+            statusMessage = "Hub preflight accepted \(response.policyCount) policy row(s); no data was persisted."
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: adminToken)
+                + "\npreflight_status=success"
+                + "\npreflight_client_id=\(response.clientID)"
+                + "\npreflight_project_id=\(response.projectID)"
+                + "\npreflight_access_code_id=\(response.accessCodeID)"
+                + "\npreflight_policy_count=\(response.policyCount)"
+                + "\npreflight_project_scoped_access=\(response.projectScopedAccess)"
+                + "\npreflight_secrets_printed=\(response.secretsPrinted)"
+        } catch ReviewAccessHubClientError.http(let status, let body) where status == 404 {
+            let message = "HTTP 404: \(body)"
+            preflightStatus = .unavailable(message)
+            statusMessage = "Hub preflight endpoint unavailable; rotate can still proceed with local validation."
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: adminToken)
+                + "\npreflight_status=unavailable"
+                + "\nerror_description=\(message)"
+        } catch ReviewAccessHubClientError.http(let status, let body) {
+            let message = "HTTP \(status): \(body)"
+            preflightStatus = .rejected(message)
+            statusMessage = "Hub preflight rejected the current payload."
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: adminToken)
+                + "\npreflight_status=failure"
+                + "\nerror_description=\(message)"
+        } catch {
+            let message = error.localizedDescription
+            preflightStatus = .rejected(message)
+            statusMessage = "Hub preflight failed for the current payload."
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/preflight", mode: .generate, payload: payload, adminToken: adminToken)
+                + "\npreflight_status=failure"
+                + "\nerror_description=\(message)"
+        }
+    }
+
     private func generateCode() async {
         await rotate(mode: .generate, rawCode: nil)
     }
@@ -1351,19 +1579,19 @@ struct ReviewAccessView: View {
         let requestID = UUID().uuidString
         guard let adminToken = ReviewAccessHubClient.adminTokenFromKeychain()?.trimmingCharacters(in: .whitespacesAndNewlines), !adminToken.isEmpty else {
             statusMessage = ReviewAccessHubClientError.missingAdminToken.localizedDescription
-            debugLog = debugLogHeader(requestID: requestID, mode: mode, payload: payload, adminToken: "")
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/rotate", mode: mode, payload: payload, adminToken: "")
                 + "\nresponse_status=failure"
                 + "\nerror_description=\(ReviewAccessHubClientError.missingAdminToken.localizedDescription)"
             return
         }
-        debugLog = debugLogHeader(requestID: requestID, mode: mode, payload: payload, adminToken: adminToken)
+        debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/rotate", mode: mode, payload: payload, adminToken: adminToken)
         isSubmitting = true
         statusMessage = "Rotating access code in Hub…"
         defer { isSubmitting = false }
 
         do {
             let response = try await ReviewAccessHubClient(baseURL: hub.hubNodeBaseURL).rotate(payload, adminToken: adminToken)
-            debugLog = debugLogHeader(requestID: requestID, mode: mode, payload: payload, adminToken: adminToken)
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/rotate", mode: mode, payload: payload, adminToken: adminToken)
                 + "\nresponse_status=success"
                 + "\nresponse_client_id=\(response.clientID)"
                 + "\nresponse_project_id=\(response.projectID)"
@@ -1389,7 +1617,7 @@ struct ReviewAccessView: View {
             }
         } catch {
             statusMessage = error.localizedDescription
-            debugLog = debugLogHeader(requestID: requestID, mode: mode, payload: payload, adminToken: adminToken)
+            debugLog = debugLogHeader(requestID: requestID, endpoint: "/v1/admin/review-auth/access-codes/rotate", mode: mode, payload: payload, adminToken: adminToken)
                 + "\nresponse_status=failure"
                 + "\nerror_description=\(error.localizedDescription)"
         }
@@ -1458,6 +1686,7 @@ struct ReviewAccessView: View {
 
     private func debugLogHeader(
         requestID: String,
+        endpoint: String,
         mode: ReviewAccessRotateRequest.Mode,
         payload: ReviewAccessRotateRequest,
         adminToken token: String
@@ -1474,7 +1703,7 @@ struct ReviewAccessView: View {
             "review_access_rotate_debug_v1",
             "request_id=\(requestID)",
             "hub_url=\(hub.hubNodeBaseURL.absoluteString)",
-            "endpoint=/v1/admin/review-auth/access-codes/rotate",
+            "endpoint=\(endpoint)",
             "keychain_service=\(ReviewAccessHubClient.keychainService)",
             "keychain_account=\(ReviewAccessHubClient.keychainAccount)",
             "admin_token_present=\(!token.isEmpty)",
