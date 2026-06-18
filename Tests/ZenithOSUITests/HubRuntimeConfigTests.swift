@@ -233,4 +233,45 @@ struct HubRuntimeConfigTests {
         #expect(invalidStatus.badges.contains(.serverRejected))
         #expect(!invalidStatus.isValid)
     }
+
+    @Test("Review Access preflight response decodes safe public policy preview")
+    func reviewAccessPreflightResponseDecodesPolicyPreview() throws {
+        let json = """
+        {
+          "ok": true,
+          "client_id": "hermione-granger",
+          "project_id": "swrl",
+          "deployment_id": "swrl-web-production",
+          "access_code_id": "hermione-granger-swrl-review",
+          "access_label": "SWRL Admin",
+          "project_scoped_access": true,
+          "email_configured": false,
+          "policy_count": 2,
+          "policies": [
+            {
+              "deployment_id": "swrl-web-production",
+              "deployment_slug": "swrl-web-production",
+              "allowed_origin": "https://www.collectswirls.com",
+              "subject_pattern": "https://www.collectswirls.com/*"
+            },
+            {
+              "deployment_id": "swrl-web-local",
+              "deployment_slug": "swrl-web-local",
+              "allowed_origin": "http://localhost:*",
+              "subject_pattern": "http://localhost:*/*"
+            }
+          ],
+          "secrets_printed": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(ReviewAccessPreflightResponse.self, from: json)
+
+        #expect(decoded.ok)
+        #expect(decoded.accessCodeID == "hermione-granger-swrl-review")
+        #expect(decoded.policyCount == 2)
+        #expect(decoded.policies.map(\.deploymentID) == ["swrl-web-production", "swrl-web-local"])
+        #expect(decoded.policies[0].subjectPattern == "https://www.collectswirls.com/*")
+        #expect(decoded.secretsPrinted == false)
+    }
 }
