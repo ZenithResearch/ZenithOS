@@ -55,4 +55,39 @@ struct ReviewAccessDebugPayloadBuilder {
             "access_label=\(context.payload.accessLabel)"
         ] + policyLines).joined(separator: "\n")
     }
+
+    static func smokeSummary(from debugLog: String) -> String {
+        let fields = Dictionary(
+            uniqueKeysWithValues: debugLog
+                .split(separator: "\n")
+                .compactMap { line -> (String, String)? in
+                    guard let separator = line.firstIndex(of: "=") else { return nil }
+                    let key = String(line[..<separator])
+                    let value = String(line[line.index(after: separator)...])
+                    return (key, value)
+                }
+        )
+        let responseStatus = fields["response_status"] ?? fields["preflight_status"] ?? "not-run"
+        let endpoint = fields["endpoint"] ?? "unknown"
+        let responseKind = endpoint.contains("/preflight") ? "preflight" : "rotate"
+        let policyCount = Int(fields["policy_count"] ?? "0") ?? 0
+        let policyLines = (0..<policyCount).map { index in
+            let deploymentID = fields["policy[\(index)].deployment_id"] ?? "unknown"
+            let allowedOrigin = fields["policy[\(index)].allowed_origin"] ?? "unknown"
+            let subjectPattern = fields["policy[\(index)].subject_pattern"] ?? "unknown"
+            let originStatus = allowedOrigin.isEmpty || allowedOrigin == "unknown" ? "missing-origin" : "origin-present"
+            let subjectStatus = subjectPattern.isEmpty || subjectPattern == "unknown" ? "missing-subject" : "subject-present"
+            return "policy[\(index)]=\(deploymentID) origin=\(allowedOrigin) subject=\(subjectPattern) status=\(originStatus),\(subjectStatus)"
+        }
+
+        return ([
+            "review_access_smoke_summary_v1",
+            "hub_url=\(fields["hub_url"] ?? "unknown")",
+            "endpoint=\(endpoint)",
+            "project_id=\(fields["project_id"] ?? "unknown")",
+            "access_code_id=\(fields["access_code_id"] ?? "unknown")",
+            "policy_count=\(policyCount)",
+            "\(responseKind)_response_status=\(responseStatus)"
+        ] + policyLines).joined(separator: "\n")
+    }
 }

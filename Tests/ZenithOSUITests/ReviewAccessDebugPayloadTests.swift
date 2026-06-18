@@ -60,6 +60,15 @@ struct ReviewAccessDebugPayloadTests {
         #expect(debugLog.contains("policy[1].subject_pattern=http://localhost:*/*"))
         #expect(!debugLog.contains("https://www.collectswirls.com*"))
         #expect(!debugLog.contains("secret-admin-token"))
+
+        let smokeSummary = ReviewAccessDebugPayloadBuilder.smokeSummary(from: debugLog + "\nresponse_status=success")
+        #expect(smokeSummary.contains("review_access_smoke_summary_v1"))
+        #expect(smokeSummary.contains("hub_url=https://hub.zenith-research.ca"))
+        #expect(smokeSummary.contains("project_id=swrl"))
+        #expect(smokeSummary.contains("access_code_id=dan-swrl-review"))
+        #expect(smokeSummary.contains("policy_count=2"))
+        #expect(smokeSummary.contains("rotate_response_status=success"))
+        #expect(smokeSummary.contains("policy[1]=swrl-web-local origin=http://localhost:* subject=http://localhost:*/* status=origin-present,subject-present"))
     }
 
     @Test("Manual code payload reports redacted raw code presence")

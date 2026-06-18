@@ -958,13 +958,27 @@ struct ReviewAccessView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let debugLog {
+                        let smokeSummary = ReviewAccessDebugPayloadBuilder.smokeSummary(from: debugLog)
                         HStack {
                             Button("Copy debug block") { copyToClipboard(debugLog) }
+                                .controlSize(.small)
+                            Button("Copy smoke summary") { copyToClipboard(smokeSummary) }
                                 .controlSize(.small)
                             Text("Debug payload ready")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
+                        Text("Smoke summary")
+                            .font(.caption.weight(.semibold))
+                        Text(smokeSummary)
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.green.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        Text("Full debug block")
+                            .font(.caption.weight(.semibold))
                         Text(debugLog)
                             .font(.caption2.monospaced())
                             .textSelection(.enabled)
