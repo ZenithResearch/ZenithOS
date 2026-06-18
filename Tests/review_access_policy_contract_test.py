@@ -4,6 +4,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessConfig.swift").read_text()
 CLIENT = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift").read_text()
 VIEW = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift").read_text()
+DEBUG_PAYLOAD = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessDebugPayload.swift").read_text()
 SOURCE_TEXT = "\n".join(
     path.read_text()
     for path in (ROOT / "Sources/ZenithOSUI/ReviewAccess").glob("*.swift")
@@ -90,7 +91,7 @@ def test_view_sends_first_policy_as_legacy_compatibility_metadata():
     assert "deploymentSlug: compatibilityPolicy?.deploymentSlug" in VIEW
     assert "allowedOrigin: compatibilityPolicy?.allowedOrigin" in VIEW
     assert "subjectPattern: compatibilityPolicy?.subjectPattern" in VIEW
-    assert "compat_deployment_id=" in VIEW
+    assert "compat_deployment_id=" in DEBUG_PAYLOAD
 
 
 def test_view_sends_explicit_access_label_separate_from_client_name():
@@ -134,13 +135,16 @@ def test_policy_row_status_reset_and_staged_debug_ui_exist():
 
 
 def test_debug_payload_shape_is_redacted_and_canonical_policy_friendly():
-    assert "admin_token_present=" in VIEW
-    assert '"admin_token_value=redacted"' in VIEW
-    assert "raw_access_code_in_payload=" in VIEW
-    assert "present-redacted" in VIEW
-    assert "policy[\\(index)].deployment_id=" in VIEW
-    assert "policy[\\(index)].allowed_origin=" in VIEW
-    assert "policy[\\(index)].subject_pattern=" in VIEW
+    assert "ReviewAccessDebugPayloadBuilder.debugLog" in VIEW
+    assert "admin_token_present=" in DEBUG_PAYLOAD
+    assert '"admin_token_value=redacted"' in DEBUG_PAYLOAD
+    assert "raw_access_code_in_payload=" in DEBUG_PAYLOAD
+    assert "present-redacted" in DEBUG_PAYLOAD
+    assert "policy[\\(index)].deployment_id=" in DEBUG_PAYLOAD
+    assert "policy[\\(index)].allowed_origin=" in DEBUG_PAYLOAD
+    assert "policy[\\(index)].subject_pattern=" in DEBUG_PAYLOAD
+    assert "review_access_smoke_summary_v1" in DEBUG_PAYLOAD
+    assert "Copy smoke summary" in VIEW
     assert "swrl-web-local" in CONFIG
     assert "https://www.collectswirls.com/*" in CONFIG
     assert "ReviewAccessConfig.normalizedPolicies(trimmedPolicies, projectID: projectIdentifier)" in VIEW
