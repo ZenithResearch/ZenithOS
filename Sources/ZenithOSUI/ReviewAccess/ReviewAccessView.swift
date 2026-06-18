@@ -22,6 +22,83 @@ private enum ReviewAccessPolicyTemplate {
     case custom
 }
 
+enum PolicyRowBadge: String, CaseIterable, Equatable, Hashable {
+    case canonical
+    case edited
+    case stale
+    case invalid
+    case serverOK = "server-ok"
+    case serverRejected = "server-rejected"
+
+    var label: String { rawValue }
+}
+
+struct PolicyRowStatusViewModel: Equatable {
+    var badges: [PolicyRowBadge]
+    var errors: [String]
+
+    var isValid: Bool { !badges.contains(.invalid) && !badges.contains(.serverRejected) }
+
+    static func build(
+        policy: ReviewAccessPolicy,
+        projectID rawProjectID: String,
+        canonicalPolicies: [ReviewAccessPolicy],
+        localErrors: [String] = [],
+        serverAccepted: Bool? = nil
+    ) -> PolicyRowStatusViewModel {
+        var badges: [PolicyRowBadge] = []
+        var errors = localErrors
+        let normalizedPolicy = normalized(policy)
+        let canonicalRows = Set(canonicalPolicies.map(normalized))
+        if isKnownStale(policy, projectID: rawProjectID) {
+            badges.append(.stale)
+            errors.append("Known stale policy; reset to canonical policies before rotating.")
+        } else if canonicalRows.contains(normalizedPolicy) {
+            badges.append(.canonical)
+        } else {
+            badges.append(.edited)
+        }
+        if !localErrors.isEmpty || policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || policy.allowedOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            badges.append(.invalid)
+        }
+        if let serverAccepted {
+            badges.append(serverAccepted ? .serverOK : .serverRejected)
+            if !serverAccepted {
+                errors.append("Hub preflight rejected this policy.")
+            }
+        }
+        return PolicyRowStatusViewModel(badges: unique(badges), errors: errors)
+    }
+
+    private static func unique(_ badges: [PolicyRowBadge]) -> [PolicyRowBadge] {
+        var seen = Set<PolicyRowBadge>()
+        return badges.filter { seen.insert($0).inserted }
+    }
+
+    static func normalized(_ policy: ReviewAccessPolicy) -> String {
+        [
+            policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.allowedOrigin.trimmingCharacters(in: .whitespacesAndNewlines),
+            policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        ].joined(separator: "\u{1f}")
+    }
+
+    static func isKnownStale(_ policy: ReviewAccessPolicy, projectID rawProjectID: String) -> Bool {
+        let projectID = rawProjectID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deploymentID = policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        if projectID == ReviewAccessProjectPreset.swrlWeb.projectID {
+            let staleLocalID = "swrl" + "-local"
+            let staleProductionWildcard = "https://www.collectswirls.com" + "*"
+            return deploymentID == staleLocalID || subject == staleProductionWildcard
+        }
+        if projectID == ReviewAccessProjectPreset.gallery.projectID {
+            return ["gallery-dev", "gallery-prod", "gallery-production"].contains(deploymentID)
+        }
+        return false
+    }
+}
+
 struct ReviewAccessView: View {
     @EnvironmentObject private var hub: HubStore
     @StateObject private var reviewStore = ReviewAccessStore()
@@ -42,20 +119,23 @@ struct ReviewAccessView: View {
     @State private var oneTimeCode: String?
     @State private var statusMessage: String?
     @State private var debugLog: String?
+    @State private var debugDrawerExpanded = false
     @State private var isSubmitting = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                HubCard { hubConnectionSection }
+                HubCard { hubStatusBar }
                 HubCard { HubRuntimeConfigView(store: runtimeConfigStore, hubBaseURL: hub.hubNodeBaseURL) }
-                HubCard { simpleTargetSection }
+                HubCard { reviewerTargetCard }
+                HubCard { projectPresetCard }
                 HubCard { policiesSection }
-                HubCard { codeSection }
+                HubCard { actionFooterSection }
                 if !reviewStore.configs.isEmpty {
                     HubCard { savedConfigsSection }
                 }
+                HubCard { debugDrawerSection }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -75,6 +155,123 @@ struct ReviewAccessView: View {
             Text("Pick the reviewer row, then generate a fresh reviewer key or paste the existing one. ZenithOS sends the allowed environment rows shown below, where you can add or edit production, preview, staging, and localhost origins before rotating.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var hubStatusBar: some View { hubConnectionSection }
+
+    private var reviewerTargetCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Reviewer target", systemImage: "person.text.rectangle")
+                .font(.headline)
+            Text("Choose whether to create a new review-access row or replace a saved Hub row. Create mode warns when the local safe metadata already contains the previewed access-code ID.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Mode", selection: $operationMode) {
+                Text("Create new row").tag(ReviewAccessOperationMode.createNew)
+                Text("Replace selected row").tag(ReviewAccessOperationMode.replaceExisting)
+            }
+            .pickerStyle(.segmented)
+            .disabled(reviewStore.configs.isEmpty)
+
+            if !reviewStore.configs.isEmpty, effectiveOperationMode == .replaceExisting {
+                Picker("Existing row to replace", selection: $selectedConfigID) {
+                    Text("Choose existing row…").tag(ReviewAccessConfig.ID?.none)
+                    ForEach(reviewStore.configs) { config in
+                        Text("\(config.accessLabel) — \(config.accessCodeID)")
+                            .tag(ReviewAccessConfig.ID?.some(config.id))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Reviewer")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if hub.contacts.isEmpty {
+                        Button("Refresh Rolodex") { Task { await hub.fetchContacts() } }
+                            .controlSize(.small)
+                    } else {
+                        Picker("Rolodex person", selection: $selectedContactID) {
+                            Text("Choose a person…").tag(VaultContact.ID?.none)
+                            ForEach(hub.contacts) { contact in
+                                Text(contact.displayName).tag(VaultContact.ID?.some(contact.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    TextField("Reviewer name", text: $clientName)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("reviewer-slug", text: $clientSlug)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                    TextField("Access label returned to apps, e.g. Dan Admin", text: $accessLabel)
+                        .textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Access-code ID preview")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(targetAccessCodeID)
+                        .font(.caption.weight(.semibold).monospaced())
+                        .textSelection(.enabled)
+                    Text("Access label: \(effectiveAccessLabel)")
+                        .font(.caption.monospaced())
+                    createModeExistingRowWarning
+                    if let selectedConfig, effectiveOperationMode == .replaceExisting {
+                        metadataSummary(for: selectedConfig)
+                    }
+                }
+            }
+            Text("For SWRL Web admin login, use the label `Dan Admin` or `SWRL Admin`; `swrl-web` checks this label server-side after Hub auth succeeds.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            mismatchWarning
+        }
+    }
+
+    private var projectPresetCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Project preset", systemImage: "rectangle.connected.to.line.below")
+                .font(.headline)
+            Text("Pick a canonical preset, edit project identity when needed, or reset stale saved policy metadata back to the canonical rows Hub expects.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Picker("Preset", selection: $selectedPreset) {
+                    ForEach(ReviewAccessProjectPreset.allCases) { preset in
+                        Text(preset.label).tag(preset)
+                    }
+                }
+                .pickerStyle(.menu)
+                Button("Apply preset") { applyProjectPreset(selectedPreset) }
+                    .controlSize(.small)
+                Button("Reset to canonical policies") { resetToCanonicalPolicies() }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+            }
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Project ID").foregroundStyle(.secondary)
+                    TextField("gallery", text: $projectID)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                }
+                GridRow {
+                    Text("Project name").foregroundStyle(.secondary)
+                    TextField("Gallery", text: $projectName)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Project slug").foregroundStyle(.secondary)
+                    Text(ReviewAccessCodeFactory.slug(from: projectID))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            canonicalEnvironmentsSummary
         }
     }
 
@@ -215,6 +412,16 @@ struct ReviewAccessView: View {
             }
 
             canonicalEnvironmentsSummary
+        }
+    }
+
+    @ViewBuilder
+    private var createModeExistingRowWarning: some View {
+        if effectiveOperationMode == .createNew,
+           reviewStore.configs.contains(where: { $0.accessCodeID == targetAccessCodeID }) {
+            Label("A saved local row already uses this access-code ID. Hub may treat create as a rotate/upsert for that row.", systemImage: "exclamationmark.triangle")
+                .font(.caption2)
+                .foregroundStyle(.orange)
         }
     }
 
@@ -519,6 +726,7 @@ struct ReviewAccessView: View {
                 }
                 .controlSize(.small)
             }
+            policyStatusBadges(for: policy.wrappedValue)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow {
                     Text("Deployment ID").foregroundStyle(.secondary)
@@ -551,7 +759,63 @@ struct ReviewAccessView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private var codeSection: some View {
+    @ViewBuilder
+    private func policyStatusBadges(for policy: ReviewAccessPolicy) -> some View {
+        let status = policyRowStatus(for: policy)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                ForEach(status.badges, id: \.self) { badge in
+                    Text(badge.label)
+                        .font(.caption2.weight(.semibold).monospaced())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(policyBadgeColor(badge).opacity(0.16))
+                        .foregroundStyle(policyBadgeColor(badge))
+                        .clipShape(Capsule())
+                }
+            }
+            ForEach(status.errors, id: \.self) { error in
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func policyRowStatus(for policy: ReviewAccessPolicy) -> PolicyRowStatusViewModel {
+        let preset = ReviewAccessProjectPreset.allCases.first { $0.projectID == projectID.trimmingCharacters(in: .whitespacesAndNewlines) } ?? selectedPreset
+        return PolicyRowStatusViewModel.build(
+            policy: policy,
+            projectID: projectID,
+            canonicalPolicies: preset.defaultPolicies,
+            localErrors: localValidationMessages(for: policy)
+        )
+    }
+
+    private func localValidationMessages(for policy: ReviewAccessPolicy) -> [String] {
+        var messages: [String] = []
+        let label = policy.label.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Policy"
+        let deploymentID = policy.deploymentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let origin = policy.allowedOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = policy.subjectPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        if deploymentID.isEmpty { messages.append("\(label): deployment ID is required") }
+        if origin.isEmpty { messages.append("\(label): allowed origin is required") }
+        if subject.isEmpty { messages.append("\(label): subject pattern is required") }
+        return messages
+    }
+
+    private func policyBadgeColor(_ badge: PolicyRowBadge) -> Color {
+        switch badge {
+        case .canonical, .serverOK:
+            return .green
+        case .edited:
+            return .accentColor
+        case .stale, .invalid, .serverRejected:
+            return .orange
+        }
+    }
+
+    private var actionFooterSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(effectiveOperationMode == .replaceExisting ? "Replace reviewer code" : "Create reviewer code", systemImage: "lock.rectangle")
                 .font(.headline)
@@ -622,24 +886,6 @@ struct ReviewAccessView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let debugLog {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Debug log")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Button("Copy debug log") { copyToClipboard(debugLog) }
-                            .controlSize(.small)
-                    }
-                    Text(debugLog)
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-            }
         }
     }
 
@@ -676,6 +922,42 @@ struct ReviewAccessView: View {
                     .buttonStyle(.plain)
                 }
                 Divider()
+            }
+        }
+    }
+
+    private var debugDrawerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DisclosureGroup(isExpanded: $debugDrawerExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Exact public payload fields are shown here for support. Admin token and raw access code values are always redacted.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let debugLog {
+                        HStack {
+                            Button("Copy debug block") { copyToClipboard(debugLog) }
+                                .controlSize(.small)
+                            Text("Debug payload ready")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(debugLog)
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.orange.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Text("No rotate payload has been prepared yet. Run a generate/replace action to populate the redacted debug block.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Debug drawer", systemImage: "ladybug")
+                    .font(.headline)
             }
         }
     }
@@ -960,6 +1242,17 @@ struct ReviewAccessView: View {
         }
         allowEditedReplacementMetadata = false
         statusMessage = "Loaded \(preset.label) project defaults with \(preset.defaultPolicies.count) allowed environment policies."
+    }
+
+    private func resetToCanonicalPolicies() {
+        let preset = ReviewAccessProjectPreset.allCases.first { $0.projectID == projectID.trimmingCharacters(in: .whitespacesAndNewlines) } ?? selectedPreset
+        selectedPreset = preset
+        projectID = preset.projectID
+        projectName = preset.projectName
+        policies = preset.defaultPolicies
+        allowEditedReplacementMetadata = false
+        let restoredRows = preset.defaultPolicies.map { $0.deploymentID }.joined(separator: ", ")
+        statusMessage = "Reset to canonical policies for \(preset.label): \(restoredRows). Compatibility metadata now previews \(preset.defaultPolicies.first?.deploymentID ?? "project-scoped")."
     }
 
     private func addPolicy(_ template: ReviewAccessPolicyTemplate) {
