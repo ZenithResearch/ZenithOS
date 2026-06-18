@@ -171,4 +171,66 @@ struct HubRuntimeConfigTests {
         #expect(updates?["max_tokens"] as? Int == 1536)
         #expect(updates?["enabled"] == nil)
     }
+
+    @Test("Stale SWRL metadata normalizes to canonical production and local policies")
+    func staleSWRLMetadataNormalizesToCanonicalPolicies() throws {
+        let staleLocalID = "swrl" + "-local"
+        let staleWildcard = "https://www.collectswirls.com" + "*"
+        let policies = ReviewAccessConfig.normalizedPolicies([
+            ReviewAccessPolicy(
+                label: "Stale production",
+                deploymentID: "swrl-web-production",
+                allowedOrigin: "https://www.collectswirls.com",
+                subjectPattern: staleWildcard
+            ),
+            ReviewAccessPolicy(
+                label: "Stale local",
+                deploymentID: staleLocalID,
+                allowedOrigin: "http://localhost:*",
+                subjectPattern: "http://localhost:*/*"
+            )
+        ], projectID: ReviewAccessProjectPreset.swrlWeb.projectID)
+
+        #expect(policies.map(\.deploymentID) == ["swrl-web-production", "swrl-web-local"])
+        #expect(policies.map(\.allowedOrigin) == ["https://www.collectswirls.com", "http://localhost:*"])
+        #expect(policies.map(\.subjectPattern) == ["https://www.collectswirls.com/*", "http://localhost:*/*"])
+    }
+
+    @Test("Policy row status marks canonical, stale, invalid, and server badges")
+    func policyRowStatusBadgesReflectValidationContract() throws {
+        let canonical = ReviewAccessProjectPreset.swrlWeb.defaultPolicies[1]
+        let canonicalStatus = PolicyRowStatusViewModel.build(
+            policy: canonical,
+            projectID: ReviewAccessProjectPreset.swrlWeb.projectID,
+            canonicalPolicies: ReviewAccessProjectPreset.swrlWeb.defaultPolicies,
+            serverAccepted: true
+        )
+        #expect(canonicalStatus.badges == [.canonical, .serverOK])
+        #expect(canonicalStatus.isValid)
+
+        let staleStatus = PolicyRowStatusViewModel.build(
+            policy: ReviewAccessPolicy(
+                label: "Stale local",
+                deploymentID: "swrl" + "-local",
+                allowedOrigin: "http://localhost:*",
+                subjectPattern: "http://localhost:*/*"
+            ),
+            projectID: ReviewAccessProjectPreset.swrlWeb.projectID,
+            canonicalPolicies: ReviewAccessProjectPreset.swrlWeb.defaultPolicies
+        )
+        #expect(staleStatus.badges.contains(.stale))
+        #expect(staleStatus.errors.contains { $0.contains("Known stale policy") })
+
+        let invalidStatus = PolicyRowStatusViewModel.build(
+            policy: ReviewAccessPolicy(label: "Custom", deploymentID: "", allowedOrigin: "", subjectPattern: ""),
+            projectID: "custom",
+            canonicalPolicies: [],
+            localErrors: ["Custom: deployment ID is required"],
+            serverAccepted: false
+        )
+        #expect(invalidStatus.badges.contains(.edited))
+        #expect(invalidStatus.badges.contains(.invalid))
+        #expect(invalidStatus.badges.contains(.serverRejected))
+        #expect(!invalidStatus.isValid)
+    }
 }
