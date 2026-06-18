@@ -958,13 +958,27 @@ struct ReviewAccessView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let debugLog {
+                        let smokeSummary = ReviewAccessDebugPayloadBuilder.smokeSummary(from: debugLog)
                         HStack {
                             Button("Copy debug block") { copyToClipboard(debugLog) }
+                                .controlSize(.small)
+                            Button("Copy smoke summary") { copyToClipboard(smokeSummary) }
                                 .controlSize(.small)
                             Text("Debug payload ready")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
+                        Text("Smoke summary")
+                            .font(.caption.weight(.semibold))
+                        Text(smokeSummary)
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.green.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        Text("Full debug block")
+                            .font(.caption.weight(.semibold))
                         Text(debugLog)
                             .font(.caption2.monospaced())
                             .textSelection(.enabled)
@@ -1691,42 +1705,20 @@ struct ReviewAccessView: View {
         payload: ReviewAccessRotateRequest,
         adminToken token: String
     ) -> String {
-        let policyLines = payload.policies.enumerated().flatMap { index, policy in
-            [
-                "policy[\(index)].deployment_id=\(policy.deploymentID)",
-                "policy[\(index)].deployment_slug=\(policy.deploymentSlug)",
-                "policy[\(index)].allowed_origin=\(policy.allowedOrigin)",
-                "policy[\(index)].subject_pattern=\(policy.subjectPattern)"
-            ]
-        }
-        return ([
-            "review_access_rotate_debug_v1",
-            "request_id=\(requestID)",
-            "hub_url=\(hub.hubNodeBaseURL.absoluteString)",
-            "endpoint=\(endpoint)",
-            "keychain_service=\(ReviewAccessHubClient.keychainService)",
-            "keychain_account=\(ReviewAccessHubClient.keychainAccount)",
-            "admin_token_present=\(!token.isEmpty)",
-            "admin_token_value=redacted",
-            "operation_mode=\(effectiveOperationMode.rawValue)",
-            "mode=\(mode.rawValue)",
-            "raw_access_code_in_payload=\(payload.accessCode == nil ? "absent" : "present-redacted")",
-            "selected_existing_row=\(effectiveOperationMode == .replaceExisting && selectedConfig != nil)",
-            "client_id=\(payload.clientID)",
-            "client_slug=\(payload.clientSlug)",
-            "client_name=\(payload.clientName)",
-            "project_id=\(payload.projectID)",
-            "project_slug=\(payload.projectSlug)",
-            "project_name=\(payload.projectName)",
-            "compat_deployment_id=\(payload.deploymentID ?? "nil")",
-            "compat_deployment_slug=\(payload.deploymentSlug ?? "nil")",
-            "compat_allowed_origin=\(payload.allowedOrigin ?? "nil")",
-            "compat_subject_pattern=\(payload.subjectPattern ?? "nil")",
-            "deployment_scoped_access=\(payload.deploymentScopedAccess)",
-            "policy_count=\(payload.policies.count)",
-            "access_code_id=\(payload.accessCodeID)",
-            "access_label=\(payload.accessLabel)"
-        ] + policyLines).joined(separator: "\n")
+        ReviewAccessDebugPayloadBuilder.debugLog(
+            context: ReviewAccessDebugPayloadBuilder.Context(
+                requestID: requestID,
+                hubURL: hub.hubNodeBaseURL,
+                endpoint: endpoint,
+                keychainService: ReviewAccessHubClient.keychainService,
+                keychainAccount: ReviewAccessHubClient.keychainAccount,
+                adminTokenPresent: !token.isEmpty,
+                operationMode: effectiveOperationMode.rawValue,
+                mode: mode,
+                selectedExistingRow: effectiveOperationMode == .replaceExisting && selectedConfig != nil,
+                payload: payload
+            )
+        )
     }
 
 
