@@ -4,6 +4,16 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessConfig.swift").read_text()
 CLIENT = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift").read_text()
 VIEW = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift").read_text()
+SOURCE_TEXT = "\n".join(
+    path.read_text()
+    for path in (ROOT / "Sources/ZenithOSUI/ReviewAccess").glob("*.swift")
+)
+
+
+def test_swrl_sources_do_not_reintroduce_legacy_policy_literals():
+    assert "https://www.collectswirls.com*" not in SOURCE_TEXT
+    assert "localhost:3000" not in SOURCE_TEXT
+    assert 'deploymentID: "swrl-local"' not in SOURCE_TEXT
 
 
 def test_gallery_preset_and_policy_model_exist():
@@ -36,7 +46,7 @@ def test_safe_config_migrates_legacy_single_policy_fields():
 def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert "normalizedPolicies" in CONFIG
     assert "discard stale local Gallery policy metadata" in CONFIG
-    assert "Older local app metadata used `swrl-local`" in CONFIG
+    assert "Older local app metadata used a legacy local deployment id" in CONFIG
     assert "ReviewAccessProjectPreset.swrlWeb.defaultPolicies" in CONFIG
     assert 'deploymentID: "gallery-local"' in CONFIG
     assert 'subjectPattern: "http://localhost:*/*"' in CONFIG
