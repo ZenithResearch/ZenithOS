@@ -4,6 +4,16 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessConfig.swift").read_text()
 CLIENT = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessHubClient.swift").read_text()
 VIEW = (ROOT / "Sources/ZenithOSUI/ReviewAccess/ReviewAccessView.swift").read_text()
+SOURCE_TEXT = "\n".join(
+    path.read_text()
+    for path in (ROOT / "Sources/ZenithOSUI/ReviewAccess").glob("*.swift")
+)
+
+
+def test_swrl_sources_do_not_reintroduce_legacy_policy_literals():
+    assert "https://www.collectswirls.com*" not in SOURCE_TEXT
+    assert "localhost:3000" not in SOURCE_TEXT
+    assert 'deploymentID: "swrl-local"' not in SOURCE_TEXT
 
 
 def test_gallery_preset_and_policy_model_exist():
@@ -36,7 +46,7 @@ def test_safe_config_migrates_legacy_single_policy_fields():
 def test_gallery_saved_metadata_normalizes_legacy_deployment_ids():
     assert "normalizedPolicies" in CONFIG
     assert "discard stale local Gallery policy metadata" in CONFIG
-    assert "Older local app metadata used `swrl-local`" in CONFIG
+    assert "Older local app metadata used a legacy local deployment id" in CONFIG
     assert "ReviewAccessProjectPreset.swrlWeb.defaultPolicies" in CONFIG
     assert 'deploymentID: "gallery-local"' in CONFIG
     assert 'subjectPattern: "http://localhost:*/*"' in CONFIG
@@ -101,3 +111,36 @@ def test_view_uses_allowed_environments_instead_of_single_scope_only():
     assert "policy[" in VIEW
     assert "reviewAccessPayload" in VIEW
     assert "policies:" in VIEW
+
+
+def test_policy_row_status_reset_and_staged_debug_ui_exist():
+    assert "enum PolicyRowBadge" in VIEW
+    assert "struct PolicyRowStatusViewModel" in VIEW
+    assert "case canonical" in VIEW
+    assert "case edited" in VIEW
+    assert "case stale" in VIEW
+    assert "case invalid" in VIEW
+    assert "case serverOK = \"server-ok\"" in VIEW
+    assert "case serverRejected = \"server-rejected\"" in VIEW
+    assert "Reset to canonical policies" in VIEW
+    assert "resetToCanonicalPolicies" in VIEW
+    assert "Compatibility metadata now previews" in VIEW
+    assert "Reviewer target" in VIEW
+    assert "Project preset" in VIEW
+    assert "Debug drawer" in VIEW
+    assert "DisclosureGroup" in VIEW
+    assert "Copy debug block" in VIEW
+    assert "A saved local row already uses this access-code ID" in VIEW
+
+
+def test_debug_payload_shape_is_redacted_and_canonical_policy_friendly():
+    assert "admin_token_present=" in VIEW
+    assert '"admin_token_value=redacted"' in VIEW
+    assert "raw_access_code_in_payload=" in VIEW
+    assert "present-redacted" in VIEW
+    assert "policy[\\(index)].deployment_id=" in VIEW
+    assert "policy[\\(index)].allowed_origin=" in VIEW
+    assert "policy[\\(index)].subject_pattern=" in VIEW
+    assert "swrl-web-local" in CONFIG
+    assert "https://www.collectswirls.com/*" in CONFIG
+    assert "ReviewAccessConfig.normalizedPolicies(trimmedPolicies, projectID: projectIdentifier)" in VIEW

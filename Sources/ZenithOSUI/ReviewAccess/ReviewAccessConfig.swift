@@ -268,10 +268,10 @@ struct ReviewAccessConfig: Identifiable, Codable, Equatable {
             // resurfacing old two-policy or gallery-dev/gallery-prod records.
             return ReviewAccessProjectPreset.gallery.defaultPolicies
         case ReviewAccessProjectPreset.swrlWeb.projectID:
-            // Older local app metadata used `swrl-local` plus bare-host
-            // production patterns like https://www.collectswirls.com*. Live Hub
-            // validates the subject-pattern origin strictly, so normalize SWRL
-            // Web saved rows back to the canonical production + local policies.
+            // Older local app metadata used a legacy local deployment id plus
+            // bare-host production wildcard patterns. Live Hub validates the
+            // subject-pattern origin strictly, so normalize SWRL Web saved rows
+            // back to the canonical production + local policies.
             return ReviewAccessProjectPreset.swrlWeb.defaultPolicies
         default:
             return policies
