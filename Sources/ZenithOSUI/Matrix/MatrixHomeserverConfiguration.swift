@@ -36,6 +36,13 @@ enum MatrixHomeserverConfiguration {
             : "Production"
     }
 
+    static func registrationDisabledMessage(for endpoint: String, serverMessage: String) -> String {
+        if label(for: endpoint) == "Local Development" {
+            return serverMessage + " Set MATRIX_ENABLE_REGISTRATION=true in your local Synapse configuration and restart the homeserver."
+        }
+        return serverMessage + " Account creation is disabled on the production homeserver. Contact a Zenith administrator for access."
+    }
+
     private static func isLoopback(_ host: String) -> Bool {
         host == "localhost" || host == "::1" || host.hasPrefix("127.")
     }
