@@ -51,8 +51,8 @@ final class MatrixClient {
 
     var isLoggedIn: Bool { _accessToken != nil }
 
-    init(baseURL: String = "http://localhost:8008", keyPrefix: String = "matrix_") {
-        self.baseURL   = baseURL
+    init(baseURL: String = MatrixHomeserverConfiguration.productionURL, keyPrefix: String = "matrix_") {
+        self.baseURL   = MatrixHomeserverConfiguration.normalized(baseURL)
         self.keyPrefix = keyPrefix
         self._accessToken = KeychainHelper.get("\(keyPrefix)access_token")  // single read
         self.userId    = UserDefaults.standard.string(forKey: "\(keyPrefix)user_id")
@@ -85,7 +85,13 @@ final class MatrixClient {
         // M_FORBIDDEN = registration disabled
         if let errcode = json1["errcode"] as? String, errcode == "M_FORBIDDEN" {
             let msg = json1["error"] as? String ?? "Registration is disabled on this homeserver."
-            throw MatrixError.httpError(403, msg + " Set MATRIX_ENABLE_REGISTRATION=true in your .env and re-generate homeserver-local.yaml.")
+            throw MatrixError.httpError(
+                403,
+                MatrixHomeserverConfiguration.registrationDisabledMessage(
+                    for: baseURL,
+                    serverMessage: msg
+                )
+            )
         }
 
         // If we got 200 directly (no flows required), we're done

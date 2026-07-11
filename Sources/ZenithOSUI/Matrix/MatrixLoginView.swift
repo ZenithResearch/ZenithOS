@@ -25,6 +25,9 @@ struct MatrixLoginView: View {
                 Text(homeserver)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
+                Text(MatrixHomeserverConfiguration.label(for: homeserver))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
 
             // Mode picker
@@ -40,7 +43,7 @@ struct MatrixLoginView: View {
             // Fields
             VStack(alignment: .leading, spacing: 12) {
                 LabeledField(label: mode == .signIn ? "Username or Matrix ID" : "Username") {
-                    TextField(mode == .signIn ? "@user:localhost" : "username", text: $user)
+                    TextField(mode == .signIn ? matrixIDPlaceholder : "username", text: $user)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                 }
@@ -91,6 +94,11 @@ struct MatrixLoginView: View {
         guard !user.isEmpty && !password.isEmpty else { return false }
         if mode == .createAccount { return password == confirm && !confirm.isEmpty }
         return true
+    }
+
+    private var matrixIDPlaceholder: String {
+        let host = URLComponents(string: homeserver)?.host ?? "homeserver"
+        return "@user:\(host)"
     }
 
     private func submit() {

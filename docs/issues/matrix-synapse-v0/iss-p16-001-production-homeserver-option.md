@@ -1,210 +1,91 @@
 # ISS-P16-001: Production homeserver option
 
-> Issue = PR boundary. Tasks below = commit boundaries inside that PR.
+> Issue = PR boundary. The three tasks below are the exact commit boundaries.
 
-## PR boundary
+- GitHub issue: https://github.com/ZenithResearch/ZenithOS/issues/1
+- Branch: `issue/1-production-matrix-endpoint`
+- Primary repo: `ZenithResearch/ZenithOS`
+- Private planning source consulted: `notes/iss-p16-001.md`
 
-- **PR scope:** ISS-P16-001: Production homeserver option
-- **Suggested branch:** `issue/iss-p16-001-production-homeserver-option`
-- **Suggested PR title:** `ISS-P16-001: Production homeserver option`
-- **Primary repo:** `ZenithResearch/ZenithOS`
-- **Supporting repo/API dependency:** `ZenithResearch/hub`
-- **Source vault note:** `private source note: iss-p16-001`
-- **GitHub issue:** https://github.com/ZenithResearch/ZenithOS/issues/1
-- **Repo-local spec path:** `docs/issues/matrix-synapse-v0/iss-p16-001-production-homeserver-option.md`
+## Objective
 
-## Full spec
+Make `https://synapse.zenith-research.ca` the default Matrix homeserver in ZenithOS while retaining the explicit `http://localhost:8008` Local Development option and removing user-visible assumptions that Matrix always runs on localhost.
 
-### Objective
+## Locked behavior
 
-Make `synapse.zenith-research.ca` available as the production Matrix homeserver option/default where appropriate while preserving localhost/dev selection.
+- Production default: `https://synapse.zenith-research.ca`.
+- Local Development: `http://localhost:8008`.
+- One normalization contract removes trailing slashes.
+- Empty or malformed inputs fall back to Production.
+- Credential-bearing, query-bearing, fragment-bearing, and path-bearing inputs fall back to Production.
+- HTTPS is required except for loopback HTTP development endpoints.
+- Both the human and Sophia clients initialize from the same normalized active endpoint.
+- Matrix clients and their tokens are immutable during a running app session. Selecting or resetting an endpoint persists the next endpoint and explicitly requires an app restart; ZenithOS does not pretend to hot-switch either client.
+- Login, client reachability, room/DM requests, and registration/invite links derive from the active endpoint.
+- Existing Matrix human and Sophia Keychain key names and token handling remain unchanged.
 
-### Repo rationale
+## Operator behavior
 
-ZenithOS owns operator UI; Hub is upstream for redacted readiness/routing APIs.
+1. Open **Hub Connection → Matrix**.
+2. Read the connection row for the active endpoint and its **Production** or **Local Development** label.
+3. Select **Use Production** or **Use Local Development**. **Reset** selects Production.
+4. If the selected endpoint differs from the active endpoint, restart ZenithOS when prompted.
+5. Reopen Hub Connection and confirm the selected endpoint is active for both human and Sophia clients.
+6. The login sheet shows the same endpoint and environment label. Invite links are generated from that same endpoint.
 
-### Dependencies / blocked by
+No credentials are needed to test endpoint selection or client-version reachability. Login and registration success require separate authorized manual evidence and are not claimed by this issue.
 
-- PRP-PR-014/015 URL and TLS locked
+## Commit boundaries
 
-### Target files and surfaces
+1. `test(matrix): define production homeserver contract`
+   - Add focused RED-first normalization, fallback, security, and labeling tests.
+   - Add the smallest production configuration contract needed to make them GREEN.
+2. `feat(matrix): use Zenith production homeserver by default`
+   - Initialize human and Sophia clients from the shared persisted endpoint.
+   - Add Production/Local Development selection, reset, restart-safe copy, and active endpoint display.
+   - Derive status, login, Matrix requests, and invite links from the active endpoint.
+3. `docs(matrix): document production endpoint selection`
+   - Reconcile this spec with the live issue.
+   - Update README/operator guidance and the changelog.
+   - Record portable verification and non-claims.
 
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
+## Verification and evidence
 
-### Locked decisions and invariants
+Run from the repository root on the final PR head:
 
-- Mission Control / ZenithOS shows Hub auth/provisioning readiness beside Matrix status now.
-- Human Matrix login, service identities, appservice credentials, and Hub admin/provisioning authority remain separate.
-- Readiness/status comes from Gateway admin endpoint.
-- Routing visibility waits on P18 routing/provenance shape.
-
-### Acceptance criteria
-
-- Production option exists; UI copy distinguishes localhost/dev from production; Keychain token behavior remains human-login only.
-- Evidence is recorded in the implementation repo or linked capture before this issue is marked complete.
-- The project note is updated with the completion evidence and any downstream blockers.
-
-### Verification commands
-
-- swift test; swift build; manual login/register error smoke.
-
-### Forbidden claims / non-goals
-
-- Do not claim production deployment unless live deploy evidence exists.
-- Do not claim Matrix identity is Hub authority.
-- Do not print or persist raw appservice/admin/reviewer secrets.
-- Do not claim wallet, secS-magik, Zenith Review SDK wallet-auth, or Dregg-backed authorization in this v0 Matrix/Synapse issue set.
-
-## Task list — commit boundaries
-
-Each checked task should land as a separate commit on the PR branch. Do not combine tasks unless the diff is mechanically inseparable; if combined, explain why in the PR body.
-
-### Task 1: Scope and baseline evidence
-
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
-
-**Objective:** Read the source vault note and inspect the target repo surfaces for `ISS-P16-001`. Confirm the exact files/modules to touch, record current behavior, and update this spec if discovery changes the file list.
-
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
-
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
-
-```bash
-git add <changed-files>
-git commit -m "docs: scope iss-p16-001"
+```sh
+swift test
+swift build --target ZenithOSUI
+./build-app.sh
+git diff --check
+curl -fsS https://synapse.zenith-research.ca/_matrix/client/versions
 ```
 
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-### Task 2: Contract / failing test or guard
+Expected evidence:
 
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
+- All Swift tests pass, including the Matrix homeserver configuration suite.
+- The `ZenithOSUI` target builds.
+- `build-app.sh` assembles and signs the local app bundle; `.build/` and `ZenithOS.app/` remain untracked.
+- `git diff --check` is clean.
+- The credential-free client versions endpoint returns HTTP 200 with Matrix versions JSON.
+- Final diff and tracked-file scans contain no credentials or generated application/build artifacts.
 
-**Objective:** Add the smallest failing test, static check, fixture, or documentation guard that proves the issue is not already complete and captures the desired behavior before implementation.
+The parent operator performs the final launch smoke before merge: verify Production is active, select Local Development, observe the restart requirement, restart if desired, then reset to Production. This implementation PR does not claim that launch smoke has occurred unless separately recorded in the PR evidence.
 
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
+## Acceptance criteria
 
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
+- [x] Fresh/default runtime targets the production Matrix endpoint.
+- [x] Operator can select Local Development and reset to Production without source edits.
+- [x] Connection and login surfaces identify the endpoint and environment.
+- [x] Registration/invite links derive from the active normalized endpoint.
+- [x] Focused tests cover defaults, normalization, malformed input, credentials, query/fragment, and insecure remote HTTP fallback.
+- [x] Token Keychain names and handling are unchanged.
+- [ ] Final automated, package, endpoint, and parent-operator launch evidence is attached to the PR before merge.
 
-```bash
-git add <changed-files>
-git commit -m "test: cover iss-p16-001 contract"
-```
+## Non-goals and forbidden claims
 
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-### Task 3: Implement the primary behavior
-
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
-
-**Objective:** Make the minimal production change for the objective. Keep the diff limited to this issue's PR boundary and do not pull in adjacent phase work.
-
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
-
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
-
-```bash
-git add <changed-files>
-git commit -m "feat: implement iss-p16-001"
-```
-
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-### Task 4: Negative cases and edge behavior
-
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
-
-**Objective:** Add fail-closed, non-leakage, duplicate/idempotency, unavailable-dependency, or no-op cases relevant to this issue. If the issue is documentation-only, add explicit forbidden examples instead.
-
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
-
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
-
-```bash
-git add <changed-files>
-git commit -m "test: harden iss-p16-001 edge cases"
-```
-
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-### Task 5: Docs, operator notes, and evidence hooks
-
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
-
-**Objective:** Update repo-local docs/runbooks/config comments so an operator or future agent can verify the behavior without reading the vault. Add evidence placeholders or command examples, but do not commit secrets or live tokens.
-
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
-
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
-
-```bash
-git add <changed-files>
-git commit -m "docs: record iss-p16-001 operator evidence"
-```
-
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-### Task 6: PR readiness verification
-
-**Commit boundary:** one commit in the `ISS-P16-001` PR.
-
-**Objective:** Run the verification commands below, run `git diff --check`, inspect the PR diff for scope creep/secrets, and update the PR body with evidence and explicit non-claims.
-
-**Files / surfaces:**
-- Sources/ZenithOSUI/Matrix/MatrixClient.swift, MatrixLoginView.swift, MatrixInboxView.swift, HubConfigView.swift, Tests
-
-**Steps:**
-1. Inspect the named files/surfaces and keep the diff limited to this issue.
-2. Make only the change required for this task.
-3. Run the narrowest relevant verification command before committing.
-4. Commit with:
-
-```bash
-git add <changed-files>
-git commit -m "chore: verify iss-p16-001 pr readiness"
-```
-
-**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
-
-## PR body checklist
-
-Before opening or marking the PR ready, include:
-
-- [ ] Link to this repo-local spec.
-- [ ] Link to source vault note `private source note: iss-p16-001`.
-- [ ] Summary of the implementation.
-- [ ] Task/commit list with commit SHAs.
-- [ ] Verification commands and results.
-- [ ] Explicit forbidden claims that remain false.
-- [ ] Supporting repo/API dependency status, if any.
-
-## Related
-
-- [[prp-pr-016|PRP-PR-016: ZenithOS production Synapse operator updates]]
-- [[../capture/2026-06-04-matrix-wallet-extension-initiative|Matrix production and vanilla auth initiative]]
-- [[projects]]
-- [[Zenith]]
-
-Areas:
-- [[Zenith]]
-- [[projects]]
+- This PR does not deploy, configure, or harden Synapse.
+- It does not prove credentialed login or registration succeeds.
+- Matrix identity does not grant Hub/operator authority.
+- It does not add or expose service/appservice/admin/access credentials.
+- It does not implement federation policy, registration policy, Hub authority, routing visibility, wallets, Dregg, secS-magik, or Review SDK authentication.

@@ -432,16 +432,51 @@ struct HubConfigView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             ConnectionRow(
-                                label: "localhost:8008",
+                                label: "\(store.matrixEndpointLabel) — \(store.matrix.baseURL)",
                                 reachable: store.matrixReachable
                             )
                             if !store.matrixVersion.isEmpty {
-                                Text("Synapse \(store.matrixVersion)")
+                                Text("Matrix Client API \(store.matrixVersion)")
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
                         }
                         Spacer()
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Homeserver")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Use Production") {
+                                store.selectMatrixHomeserver(MatrixHomeserverConfiguration.productionURL)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            Button("Use Local Development") {
+                                store.selectMatrixHomeserver(MatrixHomeserverConfiguration.localDevelopmentURL)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            Button("Reset") { store.resetMatrixHomeserver() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                        Text("Selected: \(MatrixHomeserverConfiguration.label(for: store.matrixHomeserverURL)) — \(store.matrixHomeserverURL)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        if store.matrixRestartRequired {
+                            Label("Restart ZenithOS to apply this endpoint to both the human and Sophia clients. Existing clients and tokens are not hot-switched.", systemImage: "arrow.clockwise.circle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else {
+                            Text("Active for both human and Sophia clients. Endpoint changes apply after restart.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
 
                     Divider()
