@@ -285,6 +285,15 @@ Files:
 
 Credential rule: Matrix access tokens are stored in Keychain using namespaced keys.
 
+Homeserver selection:
+
+- Fresh installs and Reset use **Production**: `https://synapse.zenith-research.ca`.
+- **Local Development** explicitly selects `http://localhost:8008`.
+- Hub Connection → Matrix shows the active endpoint and the selected endpoint. Selecting a different endpoint persists it with AppStorage and displays a restart requirement.
+- Restart ZenithOS after a change. Both the human and Sophia clients are initialized from the same normalized endpoint; immutable clients and existing tokens are not hot-switched.
+- Malformed values, credential-bearing URLs, query/fragment-bearing URLs, and insecure non-loopback HTTP values fall back to Production. Trailing slashes are removed.
+- Login, status, Matrix requests, and generated registration/invite links use the active endpoint. Matrix identity remains context only and grants no Hub authority.
+
 ### Markdown reader: `Sources/ZenithOSUI/Markdown/`, `Sources/ZenithOSUI/MarkdownResources/`
 
 The Markdown reader wraps a WebKit renderer around bundled Markdown resources.
@@ -393,6 +402,7 @@ ReviewAccessView builds request metadata
 | `hubEnvPath` app storage | `HubStore.connectSophia()` | Optional local `.env` source for Sophia app-service credentials. |
 | `hubPathRoot` app storage | `HubRemoteAccess` | Local mirror root for Hub runtime files. |
 | `hubArtifactMountsJSON` app storage | `HubArtifactMount` | Runtime-prefix to local-root mappings. |
+| `matrixHomeserverURL` app storage | `HubStore`, `MatrixHomeserverConfiguration` | Normalized Matrix endpoint selected for the next app initialization. |
 
 Development URLs are local shortcuts. A public/operator deployment should prefer the configured Hub node and authenticated Gateway admin routes.
 
