@@ -53,6 +53,7 @@ final class HubStore: ObservableObject {
     @AppStorage("hubEnvPath")  var hubEnvPath: String = HubStore.defaultHubEnvPath
     @AppStorage("hubNamespace") var hubNamespace: String = ""
     @AppStorage("hubNodeURL") var hubNodeURL: String = ReviewAccessHubClient.defaultHubURL.absoluteString
+    @AppStorage(MatrixHomeserverConfiguration.userDefaultsKey) var matrixHomeserverURL: String = MatrixHomeserverConfiguration.productionURL
     @AppStorage(HubRemoteAccess.localRootUserDefaultsKey) var hubPathRoot: String = ""
     @AppStorage(HubArtifactMount.userDefaultsKey) var hubArtifactMountsJSON: String = "[]"
 
@@ -60,15 +61,20 @@ final class HubStore: ObservableObject {
 
     init(
         queueBase: String  = "http://localhost:8081",
-        matrixBase: String = "http://localhost:8008"
+        matrixBase: String? = nil
     ) {
+        let savedMatrixBase = matrixBase ?? UserDefaults.standard.string(forKey: MatrixHomeserverConfiguration.userDefaultsKey)
+        let activeMatrixBase = MatrixHomeserverConfiguration.normalized(savedMatrixBase)
         self.queueBase = queueBase
-        self.matrix    = MatrixClient(baseURL: matrixBase, keyPrefix: "matrix_")
-        self.sophia    = MatrixClient(baseURL: matrixBase, keyPrefix: "sophia_")
+        self.matrix    = MatrixClient(baseURL: activeMatrixBase, keyPrefix: "matrix_")
+        self.sophia    = MatrixClient(baseURL: activeMatrixBase, keyPrefix: "sophia_")
+        UserDefaults.standard.set(activeMatrixBase, forKey: MatrixHomeserverConfiguration.userDefaultsKey)
     }
 
     var matrixUserId: String? { matrix.userId }
     var matrixLoggedIn: Bool  { matrix.isLoggedIn }
+    var matrixEndpointLabel: String { MatrixHomeserverConfiguration.label(for: matrix.baseURL) }
+    var matrixRestartRequired: Bool { matrixHomeserverURL != matrix.baseURL }
     var effectiveHubPathRoot: URL {
         HubRemoteAccess.localMirrorRoot(from: hubArtifactMountsJSON, rootPath: hubPathRoot)
     }
@@ -170,16 +176,16 @@ final class HubStore: ObservableObject {
     }
 
     private func checkMatrixReachability() async {
-        guard let url = URL(string: "\(matrix.baseURL)/_matrix/federation/v1/version") else { return }
+        guard let url = URL(string: "\(matrix.baseURL)/_matrix/client/versions") else { return }
         do {
             let (data, resp) = try await URLSession.shared.data(from: url)
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
                 matrixReachable = false; return
             }
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let server = json["server"] as? [String: Any],
-               let version = server["version"] as? String {
-                matrixVersion   = version
+               let versions = json["versions"] as? [String],
+               let version = versions.last {
+                matrixVersion = version
             }
             matrixReachable = true
         } catch {
@@ -257,6 +263,14 @@ final class HubStore: ObservableObject {
     func resetHubNodeURL() {
         hubNodeURL = ReviewAccessHubClient.defaultHubURL.absoluteString
         resetReviewAccessVerification(message: "Hub URL reset; verify the connection before using Review Access.")
+    }
+
+    func selectMatrixHomeserver(_ rawValue: String) {
+        matrixHomeserverURL = MatrixHomeserverConfiguration.normalized(rawValue)
+    }
+
+    func resetMatrixHomeserver() {
+        matrixHomeserverURL = MatrixHomeserverConfiguration.productionURL
     }
 
     func resetReviewAccessVerification(message: String = "Not verified") {

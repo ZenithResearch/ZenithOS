@@ -51,8 +51,8 @@ final class MatrixClient {
 
     var isLoggedIn: Bool { _accessToken != nil }
 
-    init(baseURL: String = "http://localhost:8008", keyPrefix: String = "matrix_") {
-        self.baseURL   = baseURL
+    init(baseURL: String = MatrixHomeserverConfiguration.productionURL, keyPrefix: String = "matrix_") {
+        self.baseURL   = MatrixHomeserverConfiguration.normalized(baseURL)
         self.keyPrefix = keyPrefix
         self._accessToken = KeychainHelper.get("\(keyPrefix)access_token")  // single read
         self.userId    = UserDefaults.standard.string(forKey: "\(keyPrefix)user_id")
