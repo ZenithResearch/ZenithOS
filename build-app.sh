@@ -78,6 +78,19 @@ cat > "$UI_BUNDLE/Info.plist" << 'EOF'
 </plist>
 EOF
 
+# ── Verify bundled dependencies ───────────────────────────────────────────────
+
+# Fail before signing when an executable references a non-system dynamic library
+# that was not copied into its app bundle. This turns a launch-time dyld crash
+# into an actionable build failure.
+echo "▶ Verifying bundled dependencies..."
+python3 scripts/verify_app_dependencies.py \
+    --contents "$BUNDLE" \
+    --executable "$BUNDLE/MacOS/ZenithOS"
+python3 scripts/verify_app_dependencies.py \
+    --contents "$UI_BUNDLE" \
+    --executable "$UI_BUNDLE/MacOS/ZenithOSUI"
+
 # ── Sign both ─────────────────────────────────────────────────────────────────
 
 echo "▶ Signing..."
